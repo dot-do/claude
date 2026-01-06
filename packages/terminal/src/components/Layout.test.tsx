@@ -109,8 +109,8 @@ describe('Layout', () => {
       expect(layoutDiv).toHaveClass('flex')
       expect(layoutDiv).toHaveClass('flex-col')
       expect(layoutDiv).toHaveClass('h-full')
-      expect(layoutDiv).toHaveClass('bg-black')
-      expect(layoutDiv).toHaveClass('text-white')
+      expect(layoutDiv).toHaveClass('bg-white')
+      expect(layoutDiv).toHaveClass('dark:bg-slate-900')
     })
 
     it('applies border class to header', () => {
@@ -118,7 +118,7 @@ describe('Layout', () => {
 
       const header = container.querySelector('header')
       expect(header).toHaveClass('border-b')
-      expect(header).toHaveClass('border-gray-800')
+      expect(header).toHaveClass('border-slate-200')
     })
 
     it('applies border class to sidebar', () => {
@@ -126,7 +126,7 @@ describe('Layout', () => {
 
       const aside = container.querySelector('aside')
       expect(aside).toHaveClass('border-r')
-      expect(aside).toHaveClass('border-gray-800')
+      expect(aside).toHaveClass('border-slate-200')
     })
 
     it('applies correct width style to sidebar', () => {
@@ -144,7 +144,7 @@ describe('Layout', () => {
       )
 
       // Find the bottom panel (last child with height style)
-      const bottomPanel = container.querySelector('.border-t.border-gray-800')
+      const bottomPanel = container.querySelector('.border-t.border-slate-200')
       expect(bottomPanel).toHaveStyle({ height: '150px' })
     })
 
@@ -168,7 +168,7 @@ describe('Layout', () => {
     it('uses default bottom height of 200px', () => {
       const { container } = render(<Layout bottom={<div>Bottom</div>} />)
 
-      const bottomPanel = container.querySelector('.border-t.border-gray-800')
+      const bottomPanel = container.querySelector('.border-t.border-slate-200')
       expect(bottomPanel).toHaveStyle({ height: '200px' })
     })
 
@@ -186,7 +186,7 @@ describe('Layout', () => {
         <Layout bottom={<div>Bottom</div>} bottomHeight={300} />
       )
 
-      const bottomPanel = container.querySelector('.border-t.border-gray-800')
+      const bottomPanel = container.querySelector('.border-t.border-slate-200')
       expect(bottomPanel).toHaveStyle({ height: '300px' })
     })
   })

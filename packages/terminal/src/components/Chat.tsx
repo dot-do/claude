@@ -104,7 +104,7 @@ function MarkdownContent({ content }: { content: string }) {
           }
           break
         case 'code':
-          result.push(<code key={currentKey++} className="bg-zinc-800 px-1 py-0.5 rounded text-sm font-mono">{m[1]}</code>)
+          result.push(<code key={currentKey++} className="bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-sm font-mono">{m[1]}</code>)
           remaining = remaining.substring(firstMatch.index + m[0].length)
           break
         case 'link':
@@ -112,7 +112,7 @@ function MarkdownContent({ content }: { content: string }) {
             <a
               key={currentKey++}
               href={m[2]}
-              className="text-blue-400 hover:underline"
+              className="text-blue-600 dark:text-blue-400 hover:underline"
               target="_blank"
               rel="noopener noreferrer"
             >
@@ -151,7 +151,7 @@ function MarkdownContent({ content }: { content: string }) {
         key={`code-${keyIndex++}`}
         data-testid="code-block"
         data-language={language || undefined}
-        className="bg-zinc-900 p-3 rounded-lg overflow-x-auto my-2 font-mono text-sm"
+        className="bg-slate-100 dark:bg-slate-800 p-3 rounded-lg overflow-x-auto my-2 font-mono text-sm border border-slate-200 dark:border-slate-700"
       >
         <code>{code}</code>
       </pre>
@@ -187,14 +187,14 @@ function Message({ message }: { message: ChatMessage }) {
         className={`max-w-[80%] rounded-lg px-4 py-2 ${
           isUser
             ? 'bg-blue-600 text-white'
-            : 'bg-zinc-800 text-zinc-100'
+            : 'bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700'
         }`}
       >
         <MarkdownContent content={message.content} />
         {isStreaming && (
           <span
             data-testid="streaming-indicator"
-            className="inline-block w-2 h-4 bg-zinc-400 animate-pulse ml-1"
+            className="inline-block w-2 h-4 bg-slate-400 dark:bg-slate-500 animate-pulse ml-1"
             aria-hidden="true"
           />
         )}
@@ -253,7 +253,7 @@ export function Chat({
       data-testid="chat-container"
       role="log"
       aria-label={ariaLabel}
-      className={`flex flex-col h-full bg-zinc-950 text-white ${className}`}
+      className={`flex flex-col h-full bg-white dark:bg-slate-900 text-slate-900 dark:text-white theme-transition ${className}`}
     >
       {/* Messages container */}
       <div
@@ -270,7 +270,7 @@ export function Chat({
       {/* Input form */}
       <form
         onSubmit={handleSubmit}
-        className="flex items-center gap-2 p-4 border-t border-zinc-800"
+        className="flex items-center gap-2 p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 theme-transition"
       >
         <input
           data-testid="chat-input"
@@ -281,7 +281,7 @@ export function Chat({
           placeholder={placeholder}
           disabled={disabled}
           aria-label="Message input"
-          className="flex-1 bg-zinc-800 text-white px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex-1 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-600 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed theme-transition"
         />
         <button
           data-testid="chat-submit"

@@ -65,11 +65,45 @@ export interface TerminalRef {
   fit: () => void
 }
 
-const defaultTheme: TerminalTheme = {
-  background: '#000000',
-  foreground: '#ffffff',
-  cursor: '#ffffff',
+/**
+ * Default dark terminal theme
+ */
+export const darkTerminalTheme: TerminalTheme = {
+  background: '#020617',
+  foreground: '#e2e8f0',
+  cursor: '#3b82f6',
+  cursorAccent: '#ffffff',
+  selectionBackground: 'rgba(59, 130, 246, 0.3)',
+  black: '#1e293b',
+  red: '#ef4444',
+  green: '#22c55e',
+  yellow: '#f59e0b',
+  blue: '#3b82f6',
+  magenta: '#a855f7',
+  cyan: '#06b6d4',
+  white: '#f1f5f9',
 }
+
+/**
+ * Light terminal theme
+ */
+export const lightTerminalTheme: TerminalTheme = {
+  background: '#f8fafc',
+  foreground: '#1e293b',
+  cursor: '#3b82f6',
+  cursorAccent: '#ffffff',
+  selectionBackground: 'rgba(59, 130, 246, 0.3)',
+  black: '#64748b',
+  red: '#dc2626',
+  green: '#16a34a',
+  yellow: '#d97706',
+  blue: '#2563eb',
+  magenta: '#9333ea',
+  cyan: '#0891b2',
+  white: '#f1f5f9',
+}
+
+const defaultTheme: TerminalTheme = darkTerminalTheme
 
 export const Terminal = forwardRef<TerminalRef, TerminalProps>(function Terminal({
   wsUrl,

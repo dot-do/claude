@@ -146,52 +146,61 @@ describe('FileTree', () => {
       render(<FileTree files={mockFiles} selectedPath="/package.json" />)
 
       const packageJsonButton = screen.getByText('package.json').closest('button')
-      expect(packageJsonButton).toHaveClass('bg-gray-700')
+      expect(packageJsonButton).toHaveClass('bg-slate-200')
     })
   })
 
   describe('icon display by file type', () => {
     it('displays folder icon for directories', () => {
-      render(<FileTree files={mockFiles} />)
+      const { container } = render(<FileTree files={mockFiles} />)
 
-      // Directory icon
-      expect(screen.getAllByText('📁').length).toBeGreaterThan(0)
+      // Directory icon is now an SVG with amber color class
+      const folderIcons = container.querySelectorAll('svg.text-amber-500')
+      expect(folderIcons.length).toBeGreaterThan(0)
     })
 
     it('displays TypeScript icon for .ts files', async () => {
-      render(<FileTree files={mockFiles} />)
+      const { container } = render(<FileTree files={mockFiles} />)
 
       // Expand src to see .ts file
       const srcDir = screen.getByText('src')
       fireEvent.click(srcDir)
 
       await waitFor(() => {
-        expect(screen.getAllByText('📘').length).toBeGreaterThan(0)
+        // TypeScript files have blue icon
+        const tsIcons = container.querySelectorAll('svg.text-blue-500')
+        expect(tsIcons.length).toBeGreaterThan(0)
       })
     })
 
     it('displays JavaScript icon for .js files', async () => {
-      render(<FileTree files={mockFiles} />)
+      const { container } = render(<FileTree files={mockFiles} />)
 
       // Expand src to see .js file
       const srcDir = screen.getByText('src')
       fireEvent.click(srcDir)
 
       await waitFor(() => {
-        expect(screen.getAllByText('📒').length).toBeGreaterThan(0)
+        // JavaScript files have yellow icon
+        const jsIcons = container.querySelectorAll('svg.text-yellow-500')
+        expect(jsIcons.length).toBeGreaterThan(0)
       })
     })
 
     it('displays JSON icon for .json files', () => {
-      render(<FileTree files={mockFiles} />)
+      const { container } = render(<FileTree files={mockFiles} />)
 
-      expect(screen.getAllByText('📋').length).toBeGreaterThan(0)
+      // JSON files have green icon
+      const jsonIcons = container.querySelectorAll('svg.text-green-500')
+      expect(jsonIcons.length).toBeGreaterThan(0)
     })
 
     it('displays markdown icon for .md files', () => {
-      render(<FileTree files={mockFiles} />)
+      const { container } = render(<FileTree files={mockFiles} />)
 
-      expect(screen.getAllByText('📝').length).toBeGreaterThan(0)
+      // Markdown files have slate icon
+      const mdIcons = container.querySelectorAll('svg.text-slate-500')
+      expect(mdIcons.length).toBeGreaterThan(0)
     })
 
     it('displays default icon for unknown file types', () => {
@@ -199,9 +208,11 @@ describe('FileTree', () => {
         { name: 'unknown.xyz', path: '/unknown.xyz', type: 'file' },
       ]
 
-      render(<FileTree files={unknownFile} />)
+      const { container } = render(<FileTree files={unknownFile} />)
 
-      expect(screen.getByText('📄')).toBeInTheDocument()
+      // Unknown files get slate-400 icon color
+      const defaultIcons = container.querySelectorAll('svg.text-slate-400')
+      expect(defaultIcons.length).toBeGreaterThan(0)
     })
 
     it('displays CSS icon for .css files', () => {
@@ -209,9 +220,11 @@ describe('FileTree', () => {
         { name: 'styles.css', path: '/styles.css', type: 'file' },
       ]
 
-      render(<FileTree files={cssFile} />)
+      const { container } = render(<FileTree files={cssFile} />)
 
-      expect(screen.getByText('🎨')).toBeInTheDocument()
+      // CSS files have pink icon
+      const cssIcons = container.querySelectorAll('svg.text-pink-500')
+      expect(cssIcons.length).toBeGreaterThan(0)
     })
 
     it('displays HTML icon for .html files', () => {
@@ -219,9 +232,11 @@ describe('FileTree', () => {
         { name: 'index.html', path: '/index.html', type: 'file' },
       ]
 
-      render(<FileTree files={htmlFile} />)
+      const { container } = render(<FileTree files={htmlFile} />)
 
-      expect(screen.getByText('🌐')).toBeInTheDocument()
+      // HTML files have orange icon
+      const htmlIcons = container.querySelectorAll('svg.text-orange-500')
+      expect(htmlIcons.length).toBeGreaterThan(0)
     })
 
     it('displays Python icon for .py files', () => {
@@ -229,9 +244,11 @@ describe('FileTree', () => {
         { name: 'script.py', path: '/script.py', type: 'file' },
       ]
 
-      render(<FileTree files={pyFile} />)
+      const { container } = render(<FileTree files={pyFile} />)
 
-      expect(screen.getByText('🐍')).toBeInTheDocument()
+      // Python files have blue icon
+      const pyIcons = container.querySelectorAll('svg.text-blue-500')
+      expect(pyIcons.length).toBeGreaterThan(0)
     })
 
     it('displays Rust icon for .rs files', () => {
@@ -239,9 +256,11 @@ describe('FileTree', () => {
         { name: 'main.rs', path: '/main.rs', type: 'file' },
       ]
 
-      render(<FileTree files={rsFile} />)
+      const { container } = render(<FileTree files={rsFile} />)
 
-      expect(screen.getByText('🦀')).toBeInTheDocument()
+      // Rust files have orange-600 icon
+      const rsIcons = container.querySelectorAll('svg.text-orange-600')
+      expect(rsIcons.length).toBeGreaterThan(0)
     })
 
     it('displays Go icon for .go files', () => {
@@ -249,9 +268,11 @@ describe('FileTree', () => {
         { name: 'main.go', path: '/main.go', type: 'file' },
       ]
 
-      render(<FileTree files={goFile} />)
+      const { container } = render(<FileTree files={goFile} />)
 
-      expect(screen.getByText('🐹')).toBeInTheDocument()
+      // Go files have cyan icon
+      const goIcons = container.querySelectorAll('svg.text-cyan-500')
+      expect(goIcons.length).toBeGreaterThan(0)
     })
   })
 })

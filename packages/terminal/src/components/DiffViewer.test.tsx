@@ -136,7 +136,7 @@ describe('DiffViewer', () => {
       render(<DiffViewer diff={sampleDiff} />)
       const addedLines = screen.getAllByTestId('diff-line-added')
       addedLines.forEach(line => {
-        expect(line).toHaveClass('bg-green-900/30')
+        expect(line).toHaveClass('bg-green-100')
       })
     })
 
@@ -144,7 +144,7 @@ describe('DiffViewer', () => {
       render(<DiffViewer diff={sampleDiff} />)
       const removedLines = screen.getAllByTestId('diff-line-removed')
       removedLines.forEach(line => {
-        expect(line).toHaveClass('bg-red-900/30')
+        expect(line).toHaveClass('bg-red-100')
       })
     })
   })

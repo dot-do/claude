@@ -106,12 +106,12 @@ export function Layout({
   return (
     <div
       ref={containerRef}
-      className={`flex flex-col h-full bg-black text-white ${className}`}
+      className={`flex flex-col h-full bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 theme-transition ${className}`}
       style={{ userSelect: isResizingSidebar || isResizingBottom ? 'none' : 'auto' }}
     >
       {/* Header */}
       {header && (
-        <header className="flex-shrink-0 border-b border-gray-800">
+        <header className="flex-shrink-0 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 theme-transition">
           {header}
         </header>
       )}
@@ -122,7 +122,7 @@ export function Layout({
         {showSidebar && sidebar && (
           <>
             <aside
-              className="flex-shrink-0 border-r border-gray-800 overflow-hidden"
+              className="flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30 overflow-hidden theme-transition"
               style={{ width: sidebarWidth }}
             >
               {sidebar}
@@ -142,7 +142,7 @@ export function Layout({
         {/* Main + Bottom */}
         <div className="flex flex-col flex-1 overflow-hidden">
           {/* Main content */}
-          <main className="flex-1 overflow-hidden">
+          <main className="flex-1 overflow-hidden bg-white dark:bg-slate-900 theme-transition">
             {main}
           </main>
 
@@ -159,7 +159,7 @@ export function Layout({
 
               {/* Bottom panel */}
               <div
-                className="flex-shrink-0 border-t border-gray-800 overflow-hidden"
+                className="flex-shrink-0 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30 overflow-hidden theme-transition"
                 style={{ height: bottomHeight }}
               >
                 {bottom}

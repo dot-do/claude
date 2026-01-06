@@ -163,7 +163,7 @@ function LineNumber({ oldNum, newNum, unified }: LineNumberProps) {
     return (
       <span
         data-testid="diff-line-number"
-        className="select-none text-gray-500 text-right pr-2 min-w-[4rem] inline-block font-mono text-xs"
+        className="select-none text-slate-400 dark:text-slate-500 text-right pr-2 min-w-[4rem] inline-block font-mono text-xs"
       >
         {oldNum !== undefined ? oldNum : ''}
         {oldNum !== undefined && newNum !== undefined ? ' ' : ''}
@@ -175,7 +175,7 @@ function LineNumber({ oldNum, newNum, unified }: LineNumberProps) {
   return (
     <span
       data-testid="diff-line-number"
-      className="select-none text-gray-500 text-right pr-2 min-w-[3rem] inline-block font-mono text-xs"
+      className="select-none text-slate-400 dark:text-slate-500 text-right pr-2 min-w-[3rem] inline-block font-mono text-xs"
     >
       {oldNum ?? newNum ?? ''}
     </span>
@@ -192,9 +192,9 @@ function DiffLineRow({ line, showLineNumbers, language }: DiffLineRowProps) {
   const getLineClasses = () => {
     switch (line.type) {
       case 'added':
-        return 'bg-green-900/30'
+        return 'bg-green-100 dark:bg-green-900/30'
       case 'removed':
-        return 'bg-red-900/30'
+        return 'bg-red-100 dark:bg-red-900/30'
       default:
         return ''
     }
@@ -203,9 +203,9 @@ function DiffLineRow({ line, showLineNumbers, language }: DiffLineRowProps) {
   const getIndicator = () => {
     switch (line.type) {
       case 'added':
-        return <span className="text-green-400 font-bold w-4 inline-block">+</span>
+        return <span className="text-green-600 dark:text-green-400 font-bold w-4 inline-block">+</span>
       case 'removed':
-        return <span className="text-red-400 font-bold w-4 inline-block">-</span>
+        return <span className="text-red-600 dark:text-red-400 font-bold w-4 inline-block">-</span>
       default:
         return <span className="w-4 inline-block">&nbsp;</span>
     }
@@ -250,7 +250,7 @@ function UnifiedView({ files, showLineNumbers, language }: UnifiedViewProps) {
         <div key={fileIndex} className="mb-4">
           <div
             data-testid="diff-file-header"
-            className="bg-gray-800 px-4 py-2 text-sm font-medium text-gray-200 border-b border-gray-700"
+            className="bg-slate-100 dark:bg-slate-800 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700"
           >
             {file.newPath}
           </div>
@@ -258,11 +258,11 @@ function UnifiedView({ files, showLineNumbers, language }: UnifiedViewProps) {
             <div key={hunkIndex}>
               <div
                 data-testid="diff-hunk-header"
-                className="bg-gray-800/50 px-4 py-1 text-xs text-blue-400 font-mono"
+                className="bg-slate-50 dark:bg-slate-800/50 px-4 py-1 text-xs text-blue-600 dark:text-blue-400 font-mono"
               >
                 {hunk.header}
               </div>
-              <div className="bg-gray-900">
+              <div className="bg-white dark:bg-slate-900">
                 {hunk.lines.map((line, lineIndex) => (
                   <DiffLineRow
                     key={lineIndex}
@@ -353,20 +353,20 @@ function SplitView({ files, showLineNumbers, language }: SplitViewProps) {
           <div key={fileIndex} className="mb-4">
             <div
               data-testid="diff-file-header"
-              className="bg-gray-800 px-4 py-2 text-sm font-medium text-gray-200 border-b border-gray-700"
+              className="bg-slate-100 dark:bg-slate-800 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-700"
             >
               {file.newPath}
             </div>
             <div className="flex">
               {/* Left side (old) */}
-              <div data-testid="diff-split-left" className="flex-1 border-r border-gray-700">
+              <div data-testid="diff-split-left" className="flex-1 border-r border-slate-200 dark:border-slate-700">
                 {pairs.map((pair, idx) => {
                   if (pair.left?.type === 'header') {
                     return (
                       <div
                         key={idx}
                         data-testid="diff-hunk-header"
-                        className="bg-gray-800/50 px-4 py-1 text-xs text-blue-400 font-mono"
+                        className="bg-slate-50 dark:bg-slate-800/50 px-4 py-1 text-xs text-blue-600 dark:text-blue-400 font-mono"
                       >
                         {pair.left.content}
                       </div>
@@ -376,11 +376,11 @@ function SplitView({ files, showLineNumbers, language }: SplitViewProps) {
                   const line = pair.left
                   if (!line) {
                     return (
-                      <div key={idx} className="flex font-mono text-sm leading-6 bg-gray-900/50">
+                      <div key={idx} className="flex font-mono text-sm leading-6 bg-slate-50 dark:bg-slate-900/50">
                         {showLineNumbers && (
                           <span
                             data-testid="diff-line-number"
-                            className="select-none text-gray-500 text-right pr-2 min-w-[3rem] inline-block font-mono text-xs"
+                            className="select-none text-slate-400 dark:text-slate-500 text-right pr-2 min-w-[3rem] inline-block font-mono text-xs"
                           />
                         )}
                         <span className="flex-1">&nbsp;</span>
@@ -388,7 +388,7 @@ function SplitView({ files, showLineNumbers, language }: SplitViewProps) {
                     )
                   }
 
-                  const bgClass = line.type === 'removed' ? 'bg-red-900/30' : ''
+                  const bgClass = line.type === 'removed' ? 'bg-red-100 dark:bg-red-900/30' : ''
                   const highlighted = applySyntaxHighlight(line.content, language)
 
                   return (
@@ -418,7 +418,7 @@ function SplitView({ files, showLineNumbers, language }: SplitViewProps) {
                     return (
                       <div
                         key={idx}
-                        className="bg-gray-800/50 px-4 py-1 text-xs text-blue-400 font-mono"
+                        className="bg-slate-50 dark:bg-slate-800/50 px-4 py-1 text-xs text-blue-600 dark:text-blue-400 font-mono"
                       >
                         {pair.right.content}
                       </div>
@@ -428,16 +428,16 @@ function SplitView({ files, showLineNumbers, language }: SplitViewProps) {
                   const line = pair.right
                   if (!line) {
                     return (
-                      <div key={idx} className="flex font-mono text-sm leading-6 bg-gray-900/50">
+                      <div key={idx} className="flex font-mono text-sm leading-6 bg-slate-50 dark:bg-slate-900/50">
                         {showLineNumbers && (
-                          <span className="select-none text-gray-500 text-right pr-2 min-w-[3rem] inline-block font-mono text-xs" />
+                          <span className="select-none text-slate-400 dark:text-slate-500 text-right pr-2 min-w-[3rem] inline-block font-mono text-xs" />
                         )}
                         <span className="flex-1">&nbsp;</span>
                       </div>
                     )
                   }
 
-                  const bgClass = line.type === 'added' ? 'bg-green-900/30' : ''
+                  const bgClass = line.type === 'added' ? 'bg-green-100 dark:bg-green-900/30' : ''
                   const highlighted = applySyntaxHighlight(line.content, language)
 
                   return (
@@ -483,7 +483,7 @@ export function DiffViewer({
         data-testid="diff-viewer"
         role="region"
         aria-label={ariaLabel}
-        className={`p-4 text-gray-400 text-center ${className}`}
+        className={`p-4 text-slate-400 dark:text-slate-500 text-center ${className}`}
       >
         No changes to display
       </div>
@@ -495,7 +495,7 @@ export function DiffViewer({
       data-testid="diff-viewer"
       role="region"
       aria-label={ariaLabel}
-      className={`bg-gray-900 text-gray-100 rounded-lg overflow-hidden ${className}`}
+      className={`bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 ${className}`}
     >
       {viewMode === 'unified' ? (
         <UnifiedView files={files} showLineNumbers={showLineNumbers} language={language} />
