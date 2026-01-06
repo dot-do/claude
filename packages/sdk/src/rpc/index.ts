@@ -125,11 +125,11 @@ export class RpcSession<T = unknown> {
     return this.stub
   }
 
-  async connect(): Promise<RpcStub<T>> {
+  connect(): Promise<RpcStub<T>> {
     this._state = 'connecting'
     this.notifyStateChange()
 
-    return new Promise((resolve, reject) => {
+    return new Promise<RpcStub<T>>((resolve, reject) => {
       try {
         this.ws = new WebSocket(this.options.url)
 
@@ -199,6 +199,13 @@ export class RpcSession<T = unknown> {
   private createStub(): RpcStub<T> {
     return new Proxy({} as RpcStub<T>, {
       get: (_target, prop) => {
+        // IMPORTANT: Return undefined for 'then' to avoid being treated as a thenable
+        // When Promise.resolve() receives an object, it checks for a 'then' property
+        // to determine if it's a thenable. If we return a function, the Promise
+        // will try to use it, causing infinite loops or hanging.
+        if (prop === 'then') {
+          return undefined
+        }
         return (...args: unknown[]) => {
           return this.callRemote(String(prop), args)
         }

@@ -119,7 +119,7 @@ export class ClaudeClient {
     }
 
     // Create callback handler if callbacks provided
-    if (options.callbacks) {
+    if (options?.callbacks) {
       this.callbacks = new StreamCallbackHandler(options.callbacks)
     }
   }

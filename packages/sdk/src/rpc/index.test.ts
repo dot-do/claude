@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { MockWebSocket } from './setup.js'
 import {
   RpcTarget,
   RpcSession,
@@ -14,40 +15,25 @@ import {
   type RpcSessionState,
 } from './index.js'
 
-// Mock WebSocket
-class MockWebSocket {
-  static CONNECTING = 0
-  static OPEN = 1
-  static CLOSING = 2
-  static CLOSED = 3
+/**
+ * Helper to connect a session with the mock WebSocket
+ * This handles the async coordination of starting connect and triggering open
+ */
+async function connectWithMock<T>(session: RpcSession<T>): Promise<ReturnType<typeof session.getStub>> {
+  const connectPromise = session.connect()
 
-  readyState = MockWebSocket.CONNECTING
-  onopen: (() => void) | null = null
-  onclose: (() => void) | null = null
-  onerror: ((event: unknown) => void) | null = null
-  onmessage: ((event: { data: string }) => void) | null = null
+  // WebSocket instance is created synchronously in connect()
+  const ws = MockWebSocket.getLatest()
+  if (!ws) throw new Error('No WebSocket instance created')
 
-  constructor(public url: string) {
-    // Simulate async connection
-    setTimeout(() => {
-      this.readyState = MockWebSocket.OPEN
-      this.onopen?.()
-    }, 10)
-  }
+  // Wait for the next microtask to ensure onopen handler is set up
+  await Promise.resolve()
 
-  send = vi.fn()
-  close = vi.fn().mockImplementation(() => {
-    this.readyState = MockWebSocket.CLOSED
-    this.onclose?.()
-  })
+  // Trigger the open event
+  ws.simulateOpen()
 
-  // Helper to simulate receiving a message
-  receiveMessage(data: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(data) })
-  }
+  return connectPromise
 }
-
-vi.stubGlobal('WebSocket', MockWebSocket)
 
 describe('RpcTarget', () => {
   it('should be an abstract base class', () => {
@@ -89,6 +75,7 @@ describe('RpcSession', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    MockWebSocket.clear()
     session = createRpcSession<ClaudeSandboxRpc>({
       url: 'wss://test.com/rpc',
     })
@@ -107,17 +94,15 @@ describe('RpcSession', () => {
       const stateChanges: RpcSessionState[] = []
       session.onStateChange((state) => stateChanges.push(state))
 
-      const connectPromise = session.connect()
+      await connectWithMock(session)
 
-      // Should immediately be connecting
+      // Should have transitioned through connecting to connected
       expect(stateChanges).toContain('connecting')
-
-      await connectPromise
       expect(stateChanges).toContain('connected')
     })
 
     it('should transition to disconnected when disconnect is called', async () => {
-      await session.connect()
+      await connectWithMock(session)
       expect(session.state).toBe('connected')
 
       session.disconnect()
@@ -127,12 +112,12 @@ describe('RpcSession', () => {
 
   describe('connect', () => {
     it('should connect to WebSocket URL', async () => {
-      await session.connect()
+      await connectWithMock(session)
       expect(session.state).toBe('connected')
     })
 
     it('should return RPC stub on successful connection', async () => {
-      const stub = await session.connect()
+      const stub = await connectWithMock(session)
       expect(stub).toBeDefined()
     })
   })
@@ -143,7 +128,7 @@ describe('RpcSession', () => {
     })
 
     it('should return stub after connection', async () => {
-      await session.connect()
+      await connectWithMock(session)
       const stub = session.getStub()
       expect(stub).toBeDefined()
     })
@@ -151,17 +136,17 @@ describe('RpcSession', () => {
 
   describe('RPC calls', () => {
     it('should send RPC call over WebSocket', async () => {
-      const stub = await session.connect()
+      const stub = await connectWithMock(session)
 
       // Start the RPC call (won't resolve until we send response)
       const callPromise = stub.exec('ls -la')
 
       // Get the WebSocket instance
-      const ws = (session as unknown as { ws: MockWebSocket }).ws
+      const ws = MockWebSocket.instances[0]
 
       // Verify send was called with RPC message
-      expect(ws.send).toHaveBeenCalled()
-      const sentData = JSON.parse(ws.send.mock.calls[0][0])
+      expect(ws.send.mock.calls.length).toBeGreaterThan(0)
+      const sentData = JSON.parse(ws.send.mock.calls[0][0] as string)
       expect(sentData.method).toBe('exec')
       expect(sentData.args).toEqual(['ls -la'])
 
@@ -176,11 +161,11 @@ describe('RpcSession', () => {
     })
 
     it('should handle RPC error response', async () => {
-      const stub = await session.connect()
+      const stub = await connectWithMock(session)
       const callPromise = stub.exec('invalid')
 
-      const ws = (session as unknown as { ws: MockWebSocket }).ws
-      const sentData = JSON.parse(ws.send.mock.calls[0][0])
+      const ws = MockWebSocket.instances[0]
+      const sentData = JSON.parse(ws.send.mock.calls[0][0] as string)
 
       ws.receiveMessage({
         id: sentData.id,
@@ -196,7 +181,7 @@ describe('RpcSession', () => {
       const states: RpcSessionState[] = []
       const unsubscribe = session.onStateChange((state) => states.push(state))
 
-      await session.connect()
+      await connectWithMock(session)
       session.disconnect()
 
       expect(states).toContain('connecting')
@@ -210,7 +195,7 @@ describe('RpcSession', () => {
       const states: RpcSessionState[] = []
       const unsubscribe = session.onStateChange((state) => states.push(state))
 
-      await session.connect()
+      await connectWithMock(session)
       unsubscribe()
 
       const countBeforeDisconnect = states.length
@@ -226,9 +211,9 @@ describe('RpcSession', () => {
       const messages: unknown[] = []
       session.onMessage((data) => messages.push(data))
 
-      await session.connect()
+      await connectWithMock(session)
 
-      const ws = (session as unknown as { ws: MockWebSocket }).ws
+      const ws = MockWebSocket.instances[0]
       ws.receiveMessage({ type: 'pty_output', data: 'Hello' })
 
       expect(messages).toContainEqual({ type: 'pty_output', data: 'Hello' })
@@ -237,14 +222,14 @@ describe('RpcSession', () => {
 
   describe('send', () => {
     it('should send raw data when connected', async () => {
-      await session.connect()
+      await connectWithMock(session)
 
       session.send({ type: 'pty_input', data: 'ls\n' })
 
-      const ws = (session as unknown as { ws: MockWebSocket }).ws
-      expect(ws.send).toHaveBeenCalledWith(
+      const ws = MockWebSocket.instances[0]
+      expect(ws.send.mock.calls).toContainEqual([
         JSON.stringify({ type: 'pty_input', data: 'ls\n' })
-      )
+      ])
     })
 
     it('should not throw when disconnected', () => {
@@ -281,12 +266,16 @@ describe('newWebSocketRpcSession', () => {
 })
 
 describe('ClaudeSandboxRpc interface', () => {
+  beforeEach(() => {
+    MockWebSocket.clear()
+  })
+
   it('should define expected methods', async () => {
     const session = createRpcSession<ClaudeSandboxRpc>({
       url: 'wss://test.com/rpc',
     })
 
-    const stub = await session.connect()
+    const stub = await connectWithMock(session)
 
     // Type checking - these should all be callable
     expect(typeof stub.exec).toBe('function')

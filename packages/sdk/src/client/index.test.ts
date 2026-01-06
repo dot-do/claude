@@ -1,22 +1,57 @@
 /**
  * @dotdo/claude Client Tests
  *
- * TDD RED phase - Tests for ClaudeClient
+ * Tests for ClaudeClient RPC implementation
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { ClaudeClient, ClaudeClientError } from './index.js'
 
-// Mock fetch globally
-const mockFetch = vi.fn()
-vi.stubGlobal('fetch', mockFetch)
+// Mock the capnweb module
+vi.mock('capnweb', () => {
+  const mockStub = {
+    createSession: vi.fn(),
+    getSession: vi.fn(),
+    resumeSession: vi.fn(),
+    listSessions: vi.fn(),
+    destroySession: vi.fn(),
+    sendMessage: vi.fn(),
+    sendMessageWithCallbacks: vi.fn(),
+  }
+
+  const mockSession = {
+    connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn(),
+    getStub: vi.fn().mockReturnValue(mockStub),
+  }
+
+  return {
+    newWebSocketRpcSession: vi.fn().mockReturnValue(mockSession),
+    newHttpBatchRpcSession: vi.fn().mockReturnValue(mockSession),
+    RpcTarget: class {},
+    __mockSession: mockSession,
+    __mockStub: mockStub,
+  }
+})
+
+// Get mock references
+const getMocks = async () => {
+  const capnweb = await import('capnweb')
+  return {
+    mockSession: (capnweb as any).__mockSession,
+    mockStub: (capnweb as any).__mockStub,
+  }
+}
 
 describe('ClaudeClient', () => {
   let client: ClaudeClient
 
-  beforeEach(() => {
-    mockFetch.mockReset()
-    client = new ClaudeClient({ baseUrl: 'https://api.test.com' })
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    const { mockStub } = await getMocks()
+    // Reset mock implementations
+    Object.values(mockStub).forEach((mock: any) => mock?.mockReset?.())
+    client = new ClaudeClient({ url: 'wss://test.com/rpc' })
   })
 
   afterEach(() => {
@@ -24,348 +59,208 @@ describe('ClaudeClient', () => {
   })
 
   describe('constructor', () => {
-    it('should create client with default config', () => {
-      const defaultClient = new ClaudeClient()
-      expect(defaultClient).toBeInstanceOf(ClaudeClient)
+    it('should create client with url', () => {
+      const testClient = new ClaudeClient({ url: 'wss://test.com/rpc' })
+      expect(testClient).toBeInstanceOf(ClaudeClient)
     })
 
-    it('should accept API key in config', () => {
-      const authClient = new ClaudeClient({
-        apiKey: 'sk-ant-xxx',
-        baseUrl: 'https://api.test.com',
+    it('should accept transport option', () => {
+      const httpClient = new ClaudeClient({
+        url: 'https://test.com/rpc',
+        transport: 'http',
       })
-      expect(authClient).toBeInstanceOf(ClaudeClient)
+      expect(httpClient).toBeInstanceOf(ClaudeClient)
     })
 
-    it('should accept OAuth token in config', () => {
-      const oauthClient = new ClaudeClient({
-        oauthToken: 'oauth-token',
-        baseUrl: 'https://api.test.com',
+    it('should accept callbacks option', () => {
+      const callbackClient = new ClaudeClient({
+        url: 'wss://test.com/rpc',
+        callbacks: {
+          onMessage: vi.fn(),
+          onComplete: vi.fn(),
+        },
       })
-      expect(oauthClient).toBeInstanceOf(ClaudeClient)
+      expect(callbackClient).toBeInstanceOf(ClaudeClient)
     })
   })
 
-  describe('Sessions API', () => {
-    describe('listSessions', () => {
-      it('should fetch sessions list', async () => {
-        const mockSessions = {
-          sessions: [
-            { id: 'session-1', userId: 'user-1', status: 'active', createdAt: '', updatedAt: '' },
-          ],
-          count: 1,
-        }
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockSessions),
-        })
+  describe('connect', () => {
+    it('should connect to RPC server', async () => {
+      const { mockSession } = await getMocks()
+      await client.connect()
+      expect(mockSession.connect).toHaveBeenCalled()
+      expect(client.connected).toBe(true)
+    })
 
-        const result = await client.listSessions()
+    it('should not reconnect if already connected', async () => {
+      const { mockSession } = await getMocks()
+      await client.connect()
+      await client.connect()
+      expect(mockSession.connect).toHaveBeenCalledTimes(1)
+    })
+  })
 
-        expect(mockFetch).toHaveBeenCalledWith(
-          'https://api.test.com/api/sessions',
-          expect.objectContaining({
-            headers: expect.objectContaining({
-              'Content-Type': 'application/json',
-            }),
-          })
-        )
-        expect(result.sessions).toHaveLength(1)
-        expect(result.count).toBe(1)
+  describe('disconnect', () => {
+    it('should disconnect from RPC server', async () => {
+      const { mockSession } = await getMocks()
+      await client.connect()
+      client.disconnect()
+      expect(mockSession.disconnect).toHaveBeenCalled()
+      expect(client.connected).toBe(false)
+    })
+  })
+
+  describe('Session Management', () => {
+    describe('createSession', () => {
+      it('should create session via RPC', async () => {
+        const { mockStub } = await getMocks()
+        const mockSession = { id: 'session-123', status: 'active' }
+        mockStub.createSession.mockResolvedValue(mockSession)
+
+        const result = await client.createSession()
+
+        expect(mockStub.createSession).toHaveBeenCalled()
+        expect(result.id).toBe('session-123')
       })
 
-      it('should throw ClaudeClientError on API error', async () => {
-        mockFetch.mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-          statusText: 'Unauthorized',
-          json: () => Promise.resolve({ error: 'Unauthorized' }),
-        })
+      it('should create session with options', async () => {
+        const { mockStub } = await getMocks()
+        const mockSession = { id: 'session-123', status: 'active' }
+        mockStub.createSession.mockResolvedValue(mockSession)
 
-        await expect(client.listSessions()).rejects.toThrow(ClaudeClientError)
+        const options = { cwd: '/project', model: 'claude-3-opus' }
+        await client.createSession(options)
+
+        expect(mockStub.createSession).toHaveBeenCalledWith(options)
       })
     })
 
     describe('getSession', () => {
-      it('should fetch session by ID', async () => {
-        const mockSession = {
-          id: 'session-123',
-          userId: 'user-1',
-          status: 'active',
-          createdAt: '',
-          updatedAt: '',
-        }
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockSession),
-        })
+      it('should get session by ID', async () => {
+        const { mockStub } = await getMocks()
+        const mockSession = { id: 'session-123', status: 'active' }
+        mockStub.getSession.mockResolvedValue(mockSession)
 
         const result = await client.getSession('session-123')
 
-        expect(mockFetch).toHaveBeenCalledWith(
-          'https://api.test.com/api/sessions/session-123',
-          expect.any(Object)
-        )
+        expect(mockStub.getSession).toHaveBeenCalledWith('session-123')
+        expect(result?.id).toBe('session-123')
+      })
+
+      it('should return null for non-existent session', async () => {
+        const { mockStub } = await getMocks()
+        mockStub.getSession.mockResolvedValue(null)
+
+        const result = await client.getSession('non-existent')
+
+        expect(result).toBeNull()
+      })
+    })
+
+    describe('resumeSession', () => {
+      it('should resume existing session', async () => {
+        const { mockStub } = await getMocks()
+        const mockSession = { id: 'session-123', status: 'active' }
+        mockStub.resumeSession.mockResolvedValue(mockSession)
+
+        const result = await client.resumeSession('session-123')
+
+        expect(mockStub.resumeSession).toHaveBeenCalledWith('session-123')
         expect(result.id).toBe('session-123')
+        expect(client.currentSession).toEqual(mockSession)
       })
     })
 
-    describe('createSession', () => {
-      it('should create session without options', async () => {
-        const mockResponse = { sessionId: 'new-session', status: 'pending' }
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockResponse),
-        })
+    describe('listSessions', () => {
+      it('should list all sessions', async () => {
+        const { mockStub } = await getMocks()
+        const mockSessions = [
+          { id: 'session-1', status: 'active' },
+          { id: 'session-2', status: 'completed' },
+        ]
+        mockStub.listSessions.mockResolvedValue(mockSessions)
 
-        const result = await client.createSession()
+        const result = await client.listSessions()
 
-        expect(mockFetch).toHaveBeenCalledWith(
-          'https://api.test.com/api/sessions',
-          expect.objectContaining({
-            method: 'POST',
-            body: JSON.stringify({}),
-          })
-        )
-        expect(result.sessionId).toBe('new-session')
-      })
-
-      it('should create session with repo and task', async () => {
-        const mockResponse = { sessionId: 'new-session', status: 'pending' }
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockResponse),
-        })
-
-        await client.createSession({ repo: 'owner/repo', task: 'Fix bug' })
-
-        expect(mockFetch).toHaveBeenCalledWith(
-          'https://api.test.com/api/sessions',
-          expect.objectContaining({
-            body: JSON.stringify({ repo: 'owner/repo', task: 'Fix bug' }),
-          })
-        )
+        expect(mockStub.listSessions).toHaveBeenCalled()
+        expect(result).toHaveLength(2)
       })
     })
 
-    describe('deleteSession', () => {
-      it('should delete session', async () => {
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ success: true }),
-        })
+    describe('destroySession', () => {
+      it('should destroy session by ID', async () => {
+        const { mockStub } = await getMocks()
+        mockStub.destroySession.mockResolvedValue(undefined)
 
-        const result = await client.deleteSession('session-123')
+        await client.destroySession('session-123')
 
-        expect(mockFetch).toHaveBeenCalledWith(
-          'https://api.test.com/api/sessions/session-123',
-          expect.objectContaining({ method: 'DELETE' })
-        )
-        expect(result.success).toBe(true)
+        expect(mockStub.destroySession).toHaveBeenCalledWith('session-123')
+      })
+
+      it('should destroy current session if no ID provided', async () => {
+        const { mockStub } = await getMocks()
+        const mockSession = { id: 'session-123', status: 'active' }
+        mockStub.createSession.mockResolvedValue(mockSession)
+        mockStub.destroySession.mockResolvedValue(undefined)
+
+        await client.createSession()
+        await client.destroySession()
+
+        expect(mockStub.destroySession).toHaveBeenCalledWith('session-123')
+        expect(client.currentSession).toBeNull()
       })
     })
   })
 
-  describe('Messages API', () => {
-    describe('listMessages', () => {
-      it('should fetch messages for session', async () => {
-        const mockMessages = {
-          messages: [
-            { id: 'msg-1', sessionId: 'session-1', role: 'user', content: [], createdAt: '' },
-          ],
-        }
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockMessages),
-        })
-
-        const result = await client.listMessages('session-1')
-
-        expect(mockFetch).toHaveBeenCalledWith(
-          'https://api.test.com/api/sessions/session-1/messages',
-          expect.any(Object)
-        )
-        expect(result.messages).toHaveLength(1)
-      })
-    })
-
+  describe('Messaging', () => {
     describe('sendMessage', () => {
       it('should send message to session', async () => {
-        const mockMessage = {
-          id: 'msg-1',
-          sessionId: 'session-1',
-          role: 'assistant',
-          content: [{ type: 'text', text: 'Hello!' }],
-          createdAt: '',
-        }
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockMessage),
-        })
+        const { mockStub } = await getMocks()
+        mockStub.sendMessage.mockResolvedValue(undefined)
 
-        const result = await client.sendMessage('session-1', { content: 'Hello' })
+        await client.sendMessage('session-123', 'Hello Claude!')
 
-        expect(mockFetch).toHaveBeenCalledWith(
-          'https://api.test.com/api/sessions/session-1/messages',
-          expect.objectContaining({
-            method: 'POST',
-            body: JSON.stringify({ content: 'Hello' }),
-          })
-        )
-        expect(result.role).toBe('assistant')
+        expect(mockStub.sendMessage).toHaveBeenCalledWith('session-123', 'Hello Claude!')
       })
     })
 
-    describe('streamMessages', () => {
-      it('should stream messages as async iterator', async () => {
-        // Create a mock readable stream
-        const mockEvents = [
-          'data: {"type":"message.delta","data":{"text":"Hello"}}\n\n',
-          'data: {"type":"message.delta","data":{"text":" world"}}\n\n',
-          'data: [DONE]\n\n',
-        ]
+    describe('query', () => {
+      it('should create session and send message', async () => {
+        const { mockStub } = await getMocks()
+        const mockSession = { id: 'session-123', status: 'active' }
+        mockStub.createSession.mockResolvedValue(mockSession)
+        mockStub.sendMessage.mockResolvedValue(undefined)
+        mockStub.getSession.mockResolvedValue({ ...mockSession, status: 'completed' })
 
-        const encoder = new TextEncoder()
-        let eventIndex = 0
+        const result = await client.query('What is 2+2?')
 
-        const mockReader = {
-          read: vi.fn().mockImplementation(() => {
-            if (eventIndex < mockEvents.length) {
-              const value = encoder.encode(mockEvents[eventIndex++])
-              return Promise.resolve({ done: false, value })
-            }
-            return Promise.resolve({ done: true, value: undefined })
-          }),
-        }
-
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          body: { getReader: () => mockReader },
-        })
-
-        const events: unknown[] = []
-        for await (const event of client.streamMessages('session-1', 'Hello')) {
-          events.push(event)
-        }
-
-        expect(events).toHaveLength(2)
-        expect(events[0]).toEqual({ type: 'message.delta', data: { text: 'Hello' } })
+        expect(mockStub.createSession).toHaveBeenCalled()
+        expect(mockStub.sendMessage).toHaveBeenCalledWith('session-123', 'What is 2+2?')
+        expect(result).toBe('completed')
       })
     })
   })
 
-  describe('Files API', () => {
-    describe('listFiles', () => {
-      it('should list files in directory', async () => {
-        const mockFiles = {
-          files: [
-            { name: 'index.ts', path: '/src/index.ts', type: 'file' },
-          ],
-        }
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockFiles),
-        })
+  describe('currentSession', () => {
+    it('should track current session after create', async () => {
+      const { mockStub } = await getMocks()
+      const mockSession = { id: 'session-123', status: 'active' }
+      mockStub.createSession.mockResolvedValue(mockSession)
 
-        const result = await client.listFiles('session-1', { path: '/src' })
-
-        expect(mockFetch).toHaveBeenCalledWith(
-          expect.stringContaining('/api/sessions/session-1/files?path=%2Fsrc'),
-          expect.any(Object)
-        )
-        expect(result.files).toHaveLength(1)
-      })
+      expect(client.currentSession).toBeNull()
+      await client.createSession()
+      expect(client.currentSession).toEqual(mockSession)
     })
 
-    describe('readFile', () => {
-      it('should read file content', async () => {
-        const mockContent = {
-          path: '/src/index.ts',
-          content: 'export const x = 1',
-          encoding: 'utf-8',
-          size: 18,
-        }
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockContent),
-        })
+    it('should clear current session on destroy', async () => {
+      const { mockStub } = await getMocks()
+      const mockSession = { id: 'session-123', status: 'active' }
+      mockStub.createSession.mockResolvedValue(mockSession)
+      mockStub.destroySession.mockResolvedValue(undefined)
 
-        const result = await client.readFile('session-1', '/src/index.ts')
-
-        expect(result.content).toBe('export const x = 1')
-      })
-    })
-  })
-
-  describe('Diff API', () => {
-    describe('getDiff', () => {
-      it('should get session diff', async () => {
-        const mockDiff = {
-          sessionId: 'session-1',
-          files: [
-            { path: '/src/index.ts', status: 'modified', hunks: [] },
-          ],
-          stats: { filesChanged: 1, insertions: 5, deletions: 2 },
-        }
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockDiff),
-        })
-
-        const result = await client.getDiff('session-1')
-
-        expect(result.files).toHaveLength(1)
-        expect(result.stats.filesChanged).toBe(1)
-      })
-    })
-  })
-
-  describe('Search API', () => {
-    describe('search', () => {
-      it('should search in session workspace', async () => {
-        const mockResults = {
-          results: [
-            { path: '/src/index.ts', line: 10, column: 5, match: 'export', context: { before: [], after: [] } },
-          ],
-        }
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve(mockResults),
-        })
-
-        const result = await client.search('session-1', { query: 'export' })
-
-        expect(result.results).toHaveLength(1)
-        expect(result.results[0].match).toBe('export')
-      })
-    })
-  })
-
-  describe('Error Handling', () => {
-    it('should include status in ClaudeClientError', async () => {
-      mockFetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        json: () => Promise.resolve({ error: 'Not found', errorId: 'err-123' }),
-      })
-
-      try {
-        await client.getSession('invalid')
-        expect.fail('Should have thrown')
-      } catch (error) {
-        expect(error).toBeInstanceOf(ClaudeClientError)
-        expect((error as ClaudeClientError).status).toBe(404)
-        expect((error as ClaudeClientError).errorId).toBe('err-123')
-      }
-    })
-
-    it('should handle timeout', async () => {
-      const slowClient = new ClaudeClient({ baseUrl: 'https://api.test.com', timeout: 100 })
-      mockFetch.mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, 200))
-      )
-
-      await expect(slowClient.listSessions()).rejects.toThrow()
+      await client.createSession()
+      await client.destroySession()
+      expect(client.currentSession).toBeNull()
     })
   })
 })
