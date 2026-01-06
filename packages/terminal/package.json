@@ -1,0 +1,92 @@
+{
+  "name": "@dotdo/terminal",
+  "version": "0.0.1",
+  "description": "Tool-agnostic web terminal UI - embeddable components, iframe wrapper, and Cloudflare Worker",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/components/index.d.ts",
+      "import": "./dist/components/index.mjs",
+      "require": "./dist/components/index.js"
+    },
+    "./embed": {
+      "types": "./dist/embed/index.d.ts",
+      "import": "./dist/embed/index.mjs",
+      "require": "./dist/embed/index.js"
+    },
+    "./worker": {
+      "types": "./src/worker/index.ts",
+      "import": "./src/worker/index.ts"
+    },
+    "./styles": "./dist/styles.css"
+  },
+  "files": [
+    "dist",
+    "src/worker"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "pnpm build:components && pnpm build:embed && pnpm build:app",
+    "build:components": "tsup src/components/index.ts --format esm,cjs --dts --out-dir dist/components",
+    "build:embed": "tsup src/embed/index.ts --format esm,cjs --dts --out-dir dist/embed",
+    "build:app": "vite build",
+    "preview": "vite preview",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .wrangler"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-webgl": "^0.19.0",
+    "@xterm/xterm": "^6.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.0.0",
+    "@cloudflare/workers-types": "^4.20251221.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.0",
+    "jsdom": "^25.0.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^4.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.0",
+    "vitest": "^4.0.16",
+    "wrangler": "^4.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "terminal",
+    "xterm",
+    "pty",
+    "websocket",
+    "cloudflare",
+    "workers",
+    "sandbox",
+    "embed",
+    "iframe"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dot-do/terminal.git"
+  }
+}
