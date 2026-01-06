@@ -13,6 +13,12 @@ export * from './events.js'
 // Re-export all option types
 export * from './options.js'
 
+// Re-export all type guards
+export * from './guards.js'
+
+// Re-export sandbox types
+export * from './sandbox.js'
+
 // ============================================================================
 // Legacy Types (for backward compatibility)
 // ============================================================================

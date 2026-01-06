@@ -113,6 +113,20 @@ export interface ClaudeCodeOptions {
 export type SessionStatus = 'active' | 'completed' | 'error' | 'interrupted'
 
 /**
+ * Session error details
+ */
+export interface SessionError {
+  /** Error message */
+  message: string
+  /** Error code for programmatic handling */
+  code?: string
+  /** When the error occurred */
+  timestamp: string
+  /** Stack trace (only in development) */
+  stack?: string
+}
+
+/**
  * Claude session state
  */
 export interface ClaudeSession {
@@ -149,6 +163,9 @@ export interface ClaudeSession {
 
   // Environment (not serialized to storage)
   env?: Record<string, string>
+
+  // Error details (populated when status is 'error')
+  error?: SessionError
 }
 
 // ============================================================================
@@ -205,13 +222,172 @@ export interface ClaudeCodeEnv {
 // ============================================================================
 
 /**
- * Validate ClaudeCode options (basic validation)
+ * Validation mode for unknown fields:
+ * - 'strict': Throw an error on unknown fields
+ * - 'warn': Log a warning but allow (default)
+ * - 'silent': Silently ignore unknown fields
  */
-export function validateOptions(options: unknown): ClaudeCodeOptions {
-  if (!options || typeof options !== 'object') {
+export type ValidationMode = 'strict' | 'warn' | 'silent'
+
+/**
+ * Validation options
+ */
+export interface ValidationOptions {
+  /** How to handle unknown fields (default: 'warn') */
+  mode?: ValidationMode
+}
+
+/**
+ * All known fields in ClaudeCodeOptions
+ */
+const KNOWN_FIELDS: ReadonlySet<string> = new Set([
+  // API configuration
+  'apiKey',
+  'model',
+  'fallbackModel',
+
+  // Session options
+  'cwd',
+  'env',
+
+  // Behavior configuration
+  'systemPrompt',
+  'tools',
+  'allowedTools',
+  'disallowedTools',
+
+  // Permissions
+  'permissionMode',
+  'allowDangerouslySkipPermissions',
+
+  // Limits
+  'maxTurns',
+  'maxBudgetUsd',
+  'maxThinkingTokens',
+
+  // MCP servers
+  'mcpServers',
+
+  // Sandbox configuration
+  'sleepAfter',
+  'keepAlive',
+
+  // Streaming options
+  'includePartialMessages',
+
+  // Session management
+  'resume',
+  'continue',
+  'forkSession',
+])
+
+/**
+ * Pattern to detect path traversal attacks.
+ * Matches: ../, ..\, or paths starting with ..
+ */
+const PATH_TRAVERSAL_PATTERN = /(?:^|[/\\])\.\.(?:[/\\]|$)|^\.\./
+
+/**
+ * Pattern for valid model identifiers.
+ * Only alphanumeric, hyphens, underscores, and dots are allowed.
+ */
+const VALID_MODEL_PATTERN = /^[a-zA-Z0-9._-]+$/
+
+/**
+ * Validate ClaudeCodeOptions at runtime.
+ * @param options - The options object to validate
+ * @param validationOptions - How to handle validation (default: warn on unknown)
+ * @throws Error if options are invalid
+ * @returns The validated options (may add defaults)
+ */
+export function validateOptions(
+  options: unknown,
+  validationOptions: ValidationOptions = {}
+): ClaudeCodeOptions {
+  const { mode = 'warn' } = validationOptions
+
+  if (!options || typeof options !== 'object' || Array.isArray(options)) {
     throw new Error('Options must be an object')
   }
-  return options as ClaudeCodeOptions
+
+  const opts = options as Record<string, unknown>
+
+  // Check for unknown fields
+  const unknownFields = Object.keys(opts).filter((key) => !KNOWN_FIELDS.has(key))
+  if (unknownFields.length > 0) {
+    const knownFieldsList = Array.from(KNOWN_FIELDS).sort().join(', ')
+    const message =
+      unknownFields.length === 1
+        ? `Unknown option: '${unknownFields[0]}'. Valid options are: ${knownFieldsList}`
+        : `Unknown options: '${unknownFields.join("', '")}'. Valid options are: ${knownFieldsList}`
+
+    if (mode === 'strict') {
+      throw new Error(message)
+    } else if (mode === 'warn') {
+      console.warn(message)
+    }
+    // 'silent' mode: do nothing
+  }
+
+  // Validate maxTurns if provided
+  if (opts.maxTurns !== undefined) {
+    if (typeof opts.maxTurns !== 'number' || opts.maxTurns <= 0) {
+      throw new Error('maxTurns must be a positive number')
+    }
+  }
+
+  // Validate maxBudgetUsd if provided
+  if (opts.maxBudgetUsd !== undefined) {
+    if (typeof opts.maxBudgetUsd !== 'number' || opts.maxBudgetUsd <= 0) {
+      throw new Error('maxBudgetUsd must be a positive number')
+    }
+  }
+
+  // Validate cwd if provided
+  if (opts.cwd !== undefined) {
+    if (typeof opts.cwd !== 'string') {
+      throw new Error('cwd must be a string')
+    }
+    // Check for path traversal attacks
+    if (PATH_TRAVERSAL_PATTERN.test(opts.cwd)) {
+      throw new Error(
+        "cwd contains path traversal ('..') which is not allowed for security reasons"
+      )
+    }
+  }
+
+  // Validate model if provided
+  if (opts.model !== undefined) {
+    if (typeof opts.model !== 'string') {
+      throw new Error('model must be a string')
+    }
+    // Check for invalid characters (shell injection prevention)
+    if (!VALID_MODEL_PATTERN.test(opts.model)) {
+      throw new Error(
+        'model contains invalid characters. Only alphanumeric characters, hyphens, underscores, and dots are allowed.'
+      )
+    }
+  }
+
+  // Validate fallbackModel if provided (same rules as model)
+  if (opts.fallbackModel !== undefined) {
+    if (typeof opts.fallbackModel !== 'string') {
+      throw new Error('fallbackModel must be a string')
+    }
+    if (!VALID_MODEL_PATTERN.test(opts.fallbackModel)) {
+      throw new Error(
+        'fallbackModel contains invalid characters. Only alphanumeric characters, hyphens, underscores, and dots are allowed.'
+      )
+    }
+  }
+
+  // Validate permissionMode if provided
+  const validModes = ['default', 'acceptEdits', 'bypassPermissions', 'plan']
+  if (opts.permissionMode !== undefined && !validModes.includes(opts.permissionMode as string)) {
+    throw new Error(`permissionMode must be one of: ${validModes.join(', ')}`)
+  }
+
+  return opts as ClaudeCodeOptions
 }
 
 /**

@@ -9,6 +9,19 @@
  * - NDJSON stream parsing for real-time updates
  * - Todo/Plan update callbacks
  * - capnweb RPC exposure
+ *
+ * ## Error Handling Strategy
+ *
+ * Stream errors (network disconnects, process crashes) are handled via:
+ * 1. Session state updated to 'error' with error details in session.error
+ * 2. Error event emitted via EventKeys.error(sessionId) for subscribers
+ * 3. Process resources cleaned up (marked as dead in ProcessManager)
+ * 4. Session state persisted for recovery
+ *
+ * Clients can:
+ * - Subscribe to error events: onError(sessionId, callback)
+ * - Check session.status === 'error' and read session.error
+ * - Retry by creating a new session or resuming (--resume flag)
  */
 
 import { RpcTarget } from 'capnweb'
@@ -26,38 +39,12 @@ import type {
   PermissionMode,
   SessionStatus,
 } from '../types/options.js'
+import type { Sandbox, SandboxNamespace } from '../types/sandbox.js'
 import { NDJSONParser, extractTodoUpdates, extractPlanUpdates } from './ndjson-parser.js'
 import { ProcessManager, buildCliArgs } from './process-manager.js'
 import { TypedEventEmitter, EventKeys } from '../events/emitter.js'
-
-/**
- * Sandbox interface (matches @cloudflare/sandbox)
- */
-interface Sandbox {
-  exec(
-    command: string,
-    options?: { timeout?: number; env?: Record<string, string> }
-  ): Promise<{
-    exitCode: number
-    stdout?: string
-    stderr?: string
-  }>
-  startProcess(
-    command: string,
-    options?: { env?: Record<string, string> }
-  ): Promise<{
-    id: string
-    waitForPort(port: number, options?: { timeout?: number }): Promise<void>
-  }>
-  writeFile(path: string, content: string | Uint8Array): Promise<void>
-  readFile(path: string): Promise<string>
-  streamProcessLogs?(processId: string): Promise<ReadableStream<Uint8Array>>
-  setEnvVars?(vars: Record<string, string>): Promise<void>
-}
-
-interface SandboxNamespace {
-  get(id: string): Sandbox
-}
+import { AsyncMutex } from '../utils/mutex.js'
+import { validateSandboxNamespace } from '../utils/module-validation.js'
 
 /**
  * Get sandbox instance
@@ -70,6 +57,35 @@ function getSandbox(namespace: SandboxNamespace, id: string): Sandbox {
  * ClaudeCode Durable Object
  *
  * Wraps Claude Code CLI with RPC interface matching Agent SDK
+ *
+ * ## Concurrency & Locking Strategy
+ *
+ * Session state is protected by a single AsyncMutex (`storageMutex`) that serializes
+ * all storage operations. This design was chosen because:
+ *
+ * 1. **Shared storage model**: All sessions are stored in a single Map and persisted
+ *    together via `put('sessions', this.sessions)`. Per-session mutexes would not
+ *    prevent interleaved reads/writes to the shared storage.
+ *
+ * 2. **Atomic operations**: Session creation, updates, and destruction must be atomic
+ *    relative to each other. A single mutex ensures these operations don't interleave.
+ *
+ * 3. **Simplicity**: Durable Objects already have single-threaded execution guarantees
+ *    within the DO instance. The mutex primarily protects against async interleaving
+ *    where multiple concurrent requests could cause read-modify-write races.
+ *
+ * Example race condition prevented:
+ * ```
+ * // Without mutex:
+ * Request A: reads sessions (has session X)
+ * Request B: reads sessions (has session X)
+ * Request A: adds session Y, writes sessions (X, Y)
+ * Request B: adds session Z, writes sessions (X, Z)  // Lost session Y!
+ *
+ * // With mutex:
+ * Request A: acquires lock, reads, adds Y, writes (X, Y), releases
+ * Request B: acquires lock, reads (X, Y), adds Z, writes (X, Y, Z), releases
+ * ```
  *
  * @example Server usage
  * ```typescript
@@ -105,6 +121,16 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
   private processManager: ProcessManager | null = null
   private parser: NDJSONParser
   private emitter: TypedEventEmitter
+
+  /**
+   * Mutex for serializing storage operations.
+   *
+   * Prevents race conditions when concurrent operations modify session state.
+   * All put/get operations on this.state.storage should be wrapped with this mutex.
+   *
+   * @see persistSessions - main method protected by this mutex
+   */
+  private storageMutex: AsyncMutex = new AsyncMutex()
 
   // WebSocket connections for real-time streaming
   private webSockets: Set<WebSocket> = new Set()
@@ -169,7 +195,8 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
   async createSession(options: ClaudeCodeOptions = {}): Promise<ClaudeSession> {
     // Initialize sandbox if not already
     if (!this.sandbox) {
-      this.sandbox = getSandbox(this.env.Sandbox as unknown as SandboxNamespace, this.state.id.toString())
+      const sandboxNamespace = validateSandboxNamespace(this.env.Sandbox)
+      this.sandbox = getSandbox(sandboxNamespace, this.state.id.toString())
     }
 
     // Set environment variables
@@ -450,6 +477,16 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
     return this.emitter.on(EventKeys.tool(sessionId), callback)
   }
 
+  /**
+   * Subscribe to error events
+   *
+   * Called when stream errors occur (network disconnect, process crash, etc.)
+   * The session will also be updated to status='error' with error details.
+   */
+  onError(sessionId: string, callback: (error: Error) => void): () => void {
+    return this.emitter.on(EventKeys.error(sessionId), callback)
+  }
+
   // =========================================================================
   // Private Methods
   // =========================================================================
@@ -490,8 +527,41 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
       },
     })
 
-    // Start streaming output
-    this.streamProcessOutput(session.id, processId)
+    // Start streaming output with proper error handling
+    this.streamProcessOutput(session.id, processId).catch(error => {
+      this.handleStreamError(session.id, error)
+    })
+  }
+
+  /**
+   * Handle stream errors by updating session state and emitting error event
+   */
+  private handleStreamError(sessionId: string, error: unknown): void {
+    console.error(`Stream error for session ${sessionId}:`, error)
+
+    // Update session state to error
+    const session = this.sessions.get(sessionId)
+    if (session) {
+      session.status = 'error'
+      session.error = {
+        message: error instanceof Error ? error.message : String(error),
+        code: 'STREAM_ERROR',
+        timestamp: new Date().toISOString(),
+        stack: error instanceof Error ? error.stack : undefined,
+      }
+      session.lastActivityAt = new Date().toISOString()
+
+      // Persist the error state
+      this.persistSessions().catch(persistError => {
+        console.error('Failed to persist session error state:', persistError)
+      })
+    }
+
+    // Emit error event for subscribers
+    this.emitter.emit(EventKeys.error(sessionId), error)
+
+    // Clean up resources
+    this.processManager?.markDead(sessionId)
   }
 
   /**
@@ -527,10 +597,10 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
         this.handleParsedMessage(sessionId, message)
       }
     } catch (error) {
-      console.error('Stream error:', error)
-      this.emitter.emit(EventKeys.error(sessionId), error)
+      // Use centralized error handling
+      this.handleStreamError(sessionId, error)
     } finally {
-      // Mark process as dead
+      // Mark process as dead (handles normal stream end)
       this.processManager?.markDead(sessionId)
     }
   }
@@ -555,7 +625,9 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
           const session = this.sessions.get(sessionId)
           if (session) {
             session.cliSessionId = message.session_id
-            this.persistSessions()
+            this.persistSessions().catch(error => {
+              console.error('Failed to persist sessions:', error)
+            })
           }
         }
         break
@@ -656,7 +728,9 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
         outputTokens: message.usage.output_tokens,
       }
       session.lastActivityAt = new Date().toISOString()
-      this.persistSessions()
+      this.persistSessions().catch(error => {
+        console.error('Failed to persist sessions:', error)
+      })
     }
 
     this.emitter.emit(EventKeys.result(sessionId), message)
@@ -763,9 +837,18 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
 
   /**
    * Persist sessions to storage
+   *
+   * Protected by storageMutex to prevent race conditions when concurrent
+   * operations modify session state. Each call acquires the lock, writes
+   * to storage, and releases the lock in a finally block.
    */
   private async persistSessions(): Promise<void> {
-    await this.state.storage.put('sessions', this.sessions)
+    const release = await this.storageMutex.acquire()
+    try {
+      await this.state.storage.put('sessions', this.sessions)
+    } finally {
+      release()
+    }
   }
 
   // DurableObject lifecycle methods
@@ -785,4 +868,4 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
 
 // Re-export for convenience
 export { getSandbox }
-export type { Sandbox, SandboxNamespace }
+// Note: Sandbox and SandboxNamespace types are exported from '../types/sandbox.js'

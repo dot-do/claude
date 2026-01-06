@@ -22,6 +22,25 @@ export type {
 export { ErrorCodes, RpcError } from './interfaces.js'
 
 // ============================================================================
+// RPC Timeout Error (Issue claude-7hy)
+// ============================================================================
+
+/**
+ * Error thrown when an RPC call times out
+ */
+export class RpcTimeoutError extends Error {
+  readonly method: string
+  readonly timeoutMs: number
+
+  constructor(method: string, timeoutMs: number) {
+    super(`RPC call timed out after ${timeoutMs}ms: ${method}`)
+    this.name = 'RpcTimeoutError'
+    this.method = method
+    this.timeoutMs = timeoutMs
+  }
+}
+
+// ============================================================================
 // RPC Types (for convenience, matches capnweb API)
 // ============================================================================
 
@@ -35,14 +54,23 @@ export type RpcStub<T> = {
 }
 
 /**
+ * JSON-serializable argument types for RPC pipe calls.
+ * These are the types that can be serialized over the wire.
+ */
+export type RpcPipeArg = string | number | boolean | null | undefined | RpcPipeArg[] | { [key: string]: RpcPipeArg }
+
+/**
  * RPC Promise - promise that acts as a stub for promise pipelining
  */
 export interface RpcPromise<T> extends Promise<T> {
   /**
-   * Call a method on the eventual result without waiting
+   * Call a method on the eventual result without waiting.
+   * Arguments must be JSON-serializable types.
+   * @param method - The method name to call on the result
+   * @param args - JSON-serializable arguments to pass to the method
+   * @returns A new RpcPromise with the method's return value
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  pipe(method: string, ...args: any[]): RpcPromise<any>
+  pipe(method: string, ...args: RpcPipeArg[]): RpcPromise<unknown>
 }
 
 /**
@@ -94,7 +122,20 @@ export interface RpcSessionOptions {
   reconnect?: boolean
   reconnectDelay?: number
   maxReconnectAttempts?: number
+  /** Default timeout for RPC calls in milliseconds (default: 30000ms) */
+  callTimeout?: number
 }
+
+/**
+ * Per-call timeout options
+ */
+export interface RpcCallOptions {
+  /** Timeout in milliseconds for this specific call */
+  timeout?: number
+}
+
+/** Default RPC call timeout in milliseconds */
+const DEFAULT_CALL_TIMEOUT = 30000
 
 /**
  * RPC Session state
@@ -111,8 +152,12 @@ export class RpcSession<T = unknown> {
   private _state: RpcSessionState = 'disconnected'
   private stateListeners: Set<(state: RpcSessionState) => void> = new Set()
   private messageListeners: Set<(data: unknown) => void> = new Set()
+  /** Default call timeout from options */
+  private defaultCallTimeout: number
 
-  constructor(private options: RpcSessionOptions) {}
+  constructor(private options: RpcSessionOptions) {
+    this.defaultCallTimeout = options.callTimeout ?? DEFAULT_CALL_TIMEOUT
+  }
 
   get state(): RpcSessionState {
     return this._state
@@ -142,13 +187,16 @@ export class RpcSession<T = unknown> {
         }
 
         this.ws.onclose = () => {
+          this.cleanup()
           this._state = 'disconnected'
           this.stub = null
           this.notifyStateChange()
           this.handleReconnect()
         }
 
-        this.ws.onerror = () => {
+        this.ws.onerror = (error) => {
+          console.error('WebSocket error:', error)
+          this.cleanup()
           this._state = 'error'
           this.notifyStateChange()
           reject(new Error('WebSocket error'))
@@ -171,6 +219,7 @@ export class RpcSession<T = unknown> {
   }
 
   disconnect(): void {
+    this.cleanup()
     if (this.ws) {
       this.ws.close()
       this.ws = null
@@ -178,6 +227,19 @@ export class RpcSession<T = unknown> {
     this.stub = null
     this._state = 'disconnected'
     this.notifyStateChange()
+  }
+
+  /**
+   * Clean up WebSocket event handlers to prevent memory leaks
+   */
+  private cleanup(): void {
+    if (this.ws) {
+      // Remove listeners to prevent memory leaks
+      this.ws.onclose = null
+      this.ws.onerror = null
+      this.ws.onmessage = null
+      this.ws.onopen = null
+    }
   }
 
   onStateChange(listener: (state: RpcSessionState) => void): () => void {
@@ -196,6 +258,24 @@ export class RpcSession<T = unknown> {
     }
   }
 
+  /**
+   * Get the current count of message listeners (useful for testing cleanup)
+   */
+  getMessageListenerCount(): number {
+    return this.messageListeners.size
+  }
+
+  /**
+   * Make an RPC call with a specific timeout override
+   * @param method The method name to call
+   * @param args Arguments to pass to the method
+   * @param options Call options including timeout override
+   */
+  callWithTimeout(method: string, args: unknown[], options?: RpcCallOptions): RpcPromise<unknown> {
+    const timeout = options?.timeout ?? this.defaultCallTimeout
+    return this.callRemoteWithTimeout(method, args, timeout)
+  }
+
   private createStub(): RpcStub<T> {
     return new Proxy({} as RpcStub<T>, {
       get: (_target, prop) => {
@@ -207,23 +287,37 @@ export class RpcSession<T = unknown> {
           return undefined
         }
         return (...args: unknown[]) => {
-          return this.callRemote(String(prop), args)
+          // Use timeout-aware call with default timeout
+          return this.callRemoteWithTimeout(String(prop), args, this.defaultCallTimeout)
         }
       },
     })
   }
 
-  private callRemote(method: string, args: unknown[]): RpcPromise<unknown> {
+  /**
+   * Make a remote RPC call with timeout handling
+   */
+  private callRemoteWithTimeout(method: string, args: unknown[], timeoutMs: number): RpcPromise<unknown> {
     const id = crypto.randomUUID()
+    let handler: (data: unknown) => void
+    let timeoutId: ReturnType<typeof setTimeout>
 
     const promise = new Promise((resolve, reject) => {
-      const handler = (data: unknown) => {
+      // Set up timeout
+      timeoutId = setTimeout(() => {
+        this.messageListeners.delete(handler)
+        reject(new RpcTimeoutError(method, timeoutMs))
+      }, timeoutMs)
+
+      handler = (data: unknown) => {
         if (
           typeof data === 'object' &&
           data !== null &&
           'id' in data &&
           (data as { id: string }).id === id
         ) {
+          // Clear timeout on response
+          clearTimeout(timeoutId)
           this.messageListeners.delete(handler)
           if ('error' in data) {
             reject(new Error((data as { error: string }).error))
@@ -236,9 +330,17 @@ export class RpcSession<T = unknown> {
       this.send({ id, method, args })
     })
 
-    ;(promise as RpcPromise<unknown>).pipe = (method: string, ...args: unknown[]) => {
+    ;(promise as RpcPromise<unknown>).pipe = (method: string, ...args: RpcPipeArg[]) => {
       return promise.then((result) => {
+        // Handle objects (check method in result)
         if (typeof result === 'object' && result !== null && method in result) {
+          const fn = (result as Record<string, unknown>)[method]
+          if (typeof fn === 'function') {
+            return fn.apply(result, args)
+          }
+        }
+        // Handle primitives (string, number, etc.) - check if method exists on prototype
+        if (result !== null && result !== undefined) {
           const fn = (result as Record<string, unknown>)[method]
           if (typeof fn === 'function') {
             return fn.apply(result, args)
@@ -253,7 +355,11 @@ export class RpcSession<T = unknown> {
 
   private handleMessage(data: unknown): void {
     for (const listener of this.messageListeners) {
-      listener(data)
+      try {
+        listener(data)
+      } catch (error) {
+        console.error('Callback error in message listener:', error)
+      }
     }
   }
 
@@ -273,7 +379,11 @@ export class RpcSession<T = unknown> {
 
   private notifyStateChange(): void {
     for (const listener of this.stateListeners) {
-      listener(this._state)
+      try {
+        listener(this._state)
+      } catch (error) {
+        console.error('Callback error in state change listener:', error)
+      }
     }
   }
 }

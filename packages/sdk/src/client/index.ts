@@ -4,7 +4,13 @@
  * Typed RPC client for Claude Code with callback support
  */
 
+export { ReconnectionPolicy, type ReconnectionOptions } from './reconnect.js'
+
 import { RpcTarget } from 'capnweb'
+import {
+  validateCapnwebModule,
+  isRpcStubWithCallbacks,
+} from '../utils/module-validation.js'
 import type {
   SDKMessage,
   SDKResultMessage,
@@ -19,11 +25,20 @@ import type {
   StreamCallbackHandlers,
   PermissionMode,
 } from '../types/options.js'
-import type { IClaudeCodeRpc, IStreamCallbacks } from '../rpc/interfaces.js'
+import type { IClaudeCodeRpc, IClaudeCodeRpcWithCallbacks, IStreamCallbacks } from '../rpc/interfaces.js'
+import type { RpcPromise } from '../rpc/index.js'
 
-// Types for capnweb (minimal to avoid full dependency)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type RpcStub<T> = T & { [key: string]: (...args: any[]) => Promise<any> }
+/**
+ * RPC stub type that preserves method signatures.
+ * Methods return RpcPromise for promise pipelining support.
+ */
+type RpcStub<T> = {
+  [K in keyof T]: T[K] extends (...args: infer A) => Promise<infer R>
+    ? (...args: A) => RpcPromise<R>
+    : T[K] extends (...args: infer A) => infer R
+    ? (...args: A) => RpcPromise<R>
+    : T[K]
+}
 
 interface RpcSession {
   connect(): Promise<void>
@@ -35,31 +50,58 @@ interface RpcSession {
  * Callback handler that extends RpcTarget for capnweb bidirectional RPC
  */
 class StreamCallbackHandler extends RpcTarget implements IStreamCallbacks {
-  private handlers: Partial<StreamCallbackHandlers>
+  private _handlers: Partial<StreamCallbackHandlers>
 
   constructor(handlers: Partial<StreamCallbackHandlers>) {
     super()
-    this.handlers = handlers
+    this._handlers = handlers
+  }
+
+  /**
+   * Get the current handlers for merging with new handlers
+   */
+  getHandlers(): Partial<StreamCallbackHandlers> {
+    return this._handlers
   }
 
   onMessage(message: SDKMessage): void {
-    this.handlers.onMessage?.(message)
+    try {
+      this._handlers.onMessage?.(message)
+    } catch (error) {
+      console.error('Callback error in onMessage:', error)
+    }
   }
 
   onTodoUpdate(update: TodoUpdate): void {
-    this.handlers.onTodoUpdate?.(update)
+    try {
+      this._handlers.onTodoUpdate?.(update)
+    } catch (error) {
+      console.error('Callback error in onTodoUpdate:', error)
+    }
   }
 
   onPlanUpdate(update: PlanUpdate): void {
-    this.handlers.onPlanUpdate?.(update)
+    try {
+      this._handlers.onPlanUpdate?.(update)
+    } catch (error) {
+      console.error('Callback error in onPlanUpdate:', error)
+    }
   }
 
   onError(error: { code: string; message: string }): void {
-    this.handlers.onError?.(error)
+    try {
+      this._handlers.onError?.(error)
+    } catch (err) {
+      console.error('Callback error in onError:', err)
+    }
   }
 
   onComplete(result: SDKResultMessage): void {
-    this.handlers.onComplete?.(result)
+    try {
+      this._handlers.onComplete?.(result)
+    } catch (error) {
+      console.error('Callback error in onComplete:', error)
+    }
   }
 }
 
@@ -145,15 +187,15 @@ export class ClaudeClient {
     if (this._connected) return
 
     try {
-      // Import capnweb at runtime - use any to avoid deep type instantiation
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const capnweb: any = await import('capnweb')
+      // Import capnweb at runtime with validation
+      const capnwebModule = await import('capnweb')
+      const capnweb = validateCapnwebModule(capnwebModule)
 
       // Create RPC session based on transport
       if (this.options.transport === 'http') {
-        this.session = capnweb.newHttpBatchRpcSession(this.options.url) as RpcSession
+        this.session = capnweb.newHttpBatchRpcSession(this.options.url)
       } else {
-        this.session = capnweb.newWebSocketRpcSession(this.options.url) as RpcSession
+        this.session = capnweb.newWebSocketRpcSession(this.options.url)
       }
 
       await this.session.connect()
@@ -263,8 +305,14 @@ export class ClaudeClient {
     const stub = await this.ensureConnected()
 
     if (this.callbacks) {
-      // Use callback-enabled send
-      await (stub as any).sendMessageWithCallbacks(sessionId, message, this.callbacks)
+      // Validate stub supports callbacks before using
+      if (!isRpcStubWithCallbacks(stub)) {
+        throw new ClaudeClientError(
+          'RPC stub does not support callbacks. Server may not support callback-based messaging.',
+          500
+        )
+      }
+      await stub.sendMessageWithCallbacks(sessionId, message, this.callbacks)
     } else {
       await stub.sendMessage(sessionId, message)
     }
@@ -348,11 +396,7 @@ export class ClaudeClient {
    * Subscribe to todo updates
    */
   onTodoUpdate(callback: (update: TodoUpdate) => void): () => void {
-    const existingHandlers = this.callbacks
-      ? {
-          ...((this.callbacks as any).handlers as Partial<StreamCallbackHandlers>),
-        }
-      : {}
+    const existingHandlers = this.callbacks?.getHandlers() ?? {}
 
     this.callbacks = new StreamCallbackHandler({
       ...existingHandlers,
@@ -371,11 +415,7 @@ export class ClaudeClient {
    * Subscribe to plan updates
    */
   onPlanUpdate(callback: (update: PlanUpdate) => void): () => void {
-    const existingHandlers = this.callbacks
-      ? {
-          ...((this.callbacks as any).handlers as Partial<StreamCallbackHandlers>),
-        }
-      : {}
+    const existingHandlers = this.callbacks?.getHandlers() ?? {}
 
     this.callbacks = new StreamCallbackHandler({
       ...existingHandlers,
@@ -394,11 +434,7 @@ export class ClaudeClient {
    * Subscribe to output messages
    */
   onOutput(callback: (message: SDKMessage) => void): () => void {
-    const existingHandlers = this.callbacks
-      ? {
-          ...((this.callbacks as any).handlers as Partial<StreamCallbackHandlers>),
-        }
-      : {}
+    const existingHandlers = this.callbacks?.getHandlers() ?? {}
 
     this.callbacks = new StreamCallbackHandler({
       ...existingHandlers,

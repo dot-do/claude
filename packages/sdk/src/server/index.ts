@@ -6,7 +6,9 @@
 
 // Main ClaudeCode Durable Object
 export { ClaudeCode, getSandbox } from './claude-code.js'
-export type { Sandbox, SandboxNamespace } from './claude-code.js'
+
+// Re-export Sandbox types from canonical location
+export type { Sandbox, SandboxNamespace } from '../types/sandbox.js'
 
 // NDJSON Parser
 export {
@@ -25,6 +27,8 @@ export { ProcessManager, buildCliArgs } from './process-manager.js'
 
 // Legacy server helpers (for backward compatibility)
 import type { ServerConfig } from '../types/index.js'
+import type { Sandbox } from '../types/sandbox.js'
+import { writeJsonFileCommand } from '../utils/shell.js'
 
 /**
  * Claude Code server settings for auto-accept permissions
@@ -60,7 +64,7 @@ const CLAUDE_CODE_STATE = {
  * Claude server instance with configured sandbox
  */
 export interface ClaudeServer {
-  sandbox: import('./claude-code.js').Sandbox
+  sandbox: Sandbox
   config: ServerConfig
   port: number
   start(): Promise<void>
@@ -72,7 +76,7 @@ export interface ClaudeServer {
  * @deprecated Use ClaudeCode Durable Object instead
  */
 export async function createClaudeServer(
-  sandbox: import('./claude-code.js').Sandbox,
+  sandbox: Sandbox,
   config: ServerConfig
 ): Promise<ClaudeServer> {
   const port = config.port || 7681
@@ -119,7 +123,7 @@ export async function createClaudeServer(
  * Configure Claude Code in sandbox to skip onboarding and auto-accept permissions
  */
 async function configureClaudeCode(
-  sandbox: import('./claude-code.js').Sandbox,
+  sandbox: Sandbox,
   config: ServerConfig
 ): Promise<void> {
   const claudeHome = '/home/claude'
@@ -127,19 +131,13 @@ async function configureClaudeCode(
   // Create directories
   await sandbox.exec(`mkdir -p ${claudeHome}/.claude`, { timeout: 5000 })
 
-  // Write settings
-  const settingsJson = JSON.stringify(CLAUDE_CODE_SETTINGS)
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n')
-  await sandbox.exec(`printf "${settingsJson}" > ${claudeHome}/.claude/settings.json`, {
+  // Write settings using safe heredoc (prevents shell injection)
+  await sandbox.exec(writeJsonFileCommand(CLAUDE_CODE_SETTINGS, `${claudeHome}/.claude/settings.json`), {
     timeout: 5000,
   })
 
-  // Write state
-  const stateJson = JSON.stringify(CLAUDE_CODE_STATE)
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n')
-  await sandbox.exec(`printf "${stateJson}" > ${claudeHome}/.claude.json`, {
+  // Write state using safe heredoc (prevents shell injection)
+  await sandbox.exec(writeJsonFileCommand(CLAUDE_CODE_STATE, `${claudeHome}/.claude.json`), {
     timeout: 5000,
   })
 
@@ -157,7 +155,7 @@ async function configureClaudeCode(
  * Clone a repository into the sandbox
  */
 export async function cloneRepository(
-  sandbox: import('./claude-code.js').Sandbox,
+  sandbox: Sandbox,
   repo: string,
   targetDir?: string
 ): Promise<string> {

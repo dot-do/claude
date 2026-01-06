@@ -11,6 +11,7 @@ import {
   RpcSession,
   createRpcSession,
   newWebSocketRpcSession,
+  RpcTimeoutError,
   type ClaudeSandboxRpc,
   type RpcSessionState,
 } from './index.js'
@@ -288,5 +289,482 @@ describe('ClaudeSandboxRpc interface', () => {
     expect(typeof stub.ptyResize).toBe('function')
 
     session.disconnect()
+  })
+})
+
+// ============================================================================
+// RPC Timeout Tests (TDD RED Phase - Issue claude-7hy)
+// ============================================================================
+
+describe('RPC call timeout handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    MockWebSocket.clear()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('should timeout RPC call after configured ms with no response', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+      callTimeout: 5000, // 5 second timeout
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    const stub = await connectPromise
+
+    // Start an RPC call but never respond
+    const callPromise = stub.exec('long-running-command')
+
+    // Advance time past the timeout
+    vi.advanceTimersByTime(5001)
+
+    // Should reject with timeout error
+    await expect(callPromise).rejects.toThrow('RPC call timed out')
+
+    session.disconnect()
+  })
+
+  it('should use default timeout of 30000ms when not configured', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+      // No callTimeout specified - should default to 30000ms
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    const stub = await connectPromise
+
+    // Start an RPC call but never respond
+    const callPromise = stub.exec('command')
+
+    // Advance time but not past default timeout
+    vi.advanceTimersByTime(29000)
+
+    // Should still be pending
+    let resolved = false
+    callPromise.then(() => { resolved = true }).catch(() => { resolved = true })
+    await Promise.resolve()
+    expect(resolved).toBe(false)
+
+    // Advance past 30 second default timeout
+    vi.advanceTimersByTime(2000)
+
+    // Should reject with timeout error
+    await expect(callPromise).rejects.toThrow('RPC call timed out')
+
+    session.disconnect()
+  })
+
+  it('should allow per-call timeout override', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+      callTimeout: 30000, // Default 30 seconds
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    await connectPromise
+
+    // Use per-call timeout option (shorter than default)
+    const callPromise = session.callWithTimeout('exec', ['quick-command'], { timeout: 1000 })
+
+    // Advance time past the per-call timeout
+    vi.advanceTimersByTime(1001)
+
+    // Should reject with timeout error
+    await expect(callPromise).rejects.toThrow('RPC call timed out')
+
+    session.disconnect()
+  })
+
+  it('should cleanup pending call handlers on timeout', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+      callTimeout: 1000,
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    const stub = await connectPromise
+
+    // Track message listeners count before call
+    const initialListenerCount = session.getMessageListenerCount()
+
+    // Start an RPC call
+    const callPromise = stub.exec('command')
+
+    // Should have added a listener for this call
+    expect(session.getMessageListenerCount()).toBe(initialListenerCount + 1)
+
+    // Advance time past the timeout
+    vi.advanceTimersByTime(1001)
+
+    // Let the rejection propagate
+    await callPromise.catch(() => {})
+
+    // Listener should be cleaned up after timeout
+    expect(session.getMessageListenerCount()).toBe(initialListenerCount)
+
+    session.disconnect()
+  })
+
+  it('should clear timeout when response arrives before timeout', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+      callTimeout: 5000,
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    const stub = await connectPromise
+
+    // Start an RPC call
+    const callPromise = stub.exec('command')
+
+    // Advance time but not past timeout
+    vi.advanceTimersByTime(1000)
+
+    // Send response before timeout
+    const sentData = JSON.parse(ws.send.mock.calls[0][0] as string)
+    ws.receiveMessage({
+      id: sentData.id,
+      result: { exitCode: 0, stdout: 'success', stderr: '' },
+    })
+
+    // Should resolve successfully
+    const result = await callPromise
+    expect(result).toEqual({ exitCode: 0, stdout: 'success', stderr: '' })
+
+    // Advance time past what would have been the timeout
+    vi.advanceTimersByTime(5000)
+
+    // No error should occur - timeout was cleared
+    session.disconnect()
+  })
+
+  it('should throw RpcTimeoutError with call details', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+      callTimeout: 1000,
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    const stub = await connectPromise
+
+    // Start an RPC call
+    const callPromise = stub.exec('test-command')
+
+    // Advance time past the timeout
+    vi.advanceTimersByTime(1001)
+
+    // Should reject with RpcTimeoutError that includes method name
+    try {
+      await callPromise
+      expect.fail('Should have thrown')
+    } catch (error) {
+      expect(error).toBeInstanceOf(RpcTimeoutError)
+      expect((error as RpcTimeoutError).method).toBe('exec')
+      expect((error as RpcTimeoutError).timeoutMs).toBe(1000)
+    }
+
+    session.disconnect()
+  })
+})
+
+// ============================================================================
+// RpcPromise.pipe Tests (TDD RED Phase - Issue claude-sds)
+// Replace 'any' types with proper TypeScript types
+// ============================================================================
+
+describe('RpcPromise.pipe method', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    MockWebSocket.clear()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('should allow promise pipelining with typed arguments', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    const stub = await connectPromise
+
+    // Start an RPC call
+    const callPromise = stub.readFile('/path/to/file')
+
+    // Get sent data
+    const sentData = JSON.parse(ws.send.mock.calls[0][0] as string)
+
+    // Simulate response with an object that has a method
+    ws.receiveMessage({
+      id: sentData.id,
+      result: 'file content here',
+    })
+
+    const result = await callPromise
+    expect(result).toBe('file content here')
+
+    session.disconnect()
+  })
+
+  it('should pipe method calls with typed string arguments', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    const stub = await connectPromise
+
+    // Start an RPC call
+    const callPromise = stub.readFile('/path/to/file')
+
+    // Get sent data
+    const sentData = JSON.parse(ws.send.mock.calls[0][0] as string)
+
+    // Simulate response with a string (strings have methods like toUpperCase)
+    ws.receiveMessage({
+      id: sentData.id,
+      result: 'hello world',
+    })
+
+    // Test piping to string's toUpperCase method
+    const piped = callPromise.pipe('toUpperCase')
+    const pipedResult = await piped
+    expect(pipedResult).toBe('HELLO WORLD')
+
+    session.disconnect()
+  })
+
+  it('should pipe method calls with typed number arguments', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    const stub = await connectPromise
+
+    // Start an RPC call
+    const callPromise = stub.readFile('/path/to/file')
+
+    // Get sent data
+    const sentData = JSON.parse(ws.send.mock.calls[0][0] as string)
+
+    // Simulate response with a string (strings have slice method with number args)
+    ws.receiveMessage({
+      id: sentData.id,
+      result: 'hello world',
+    })
+
+    // Test piping with number args (string.slice takes start, end)
+    const piped = callPromise.pipe('slice', 0, 5)
+    const pipedResult = await piped
+    expect(pipedResult).toBe('hello')
+
+    session.disconnect()
+  })
+
+  it('should pipe method calls with mixed typed arguments', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    const stub = await connectPromise
+
+    // Start an RPC call
+    const callPromise = stub.readFile('/path/to/file')
+
+    // Get sent data
+    const sentData = JSON.parse(ws.send.mock.calls[0][0] as string)
+
+    // Simulate response with a string
+    ws.receiveMessage({
+      id: sentData.id,
+      result: 'hello world',
+    })
+
+    // Test piping with mixed args: string.replace(string, string)
+    const piped = callPromise.pipe('replace', 'world', 'there')
+    const pipedResult = await piped
+    expect(pipedResult).toBe('hello there')
+
+    session.disconnect()
+  })
+
+  it('should throw when piped method does not exist on result', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+    })
+
+    // Connect the session
+    const connectPromise = session.connect()
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+    await Promise.resolve()
+    ws.simulateOpen()
+    const stub = await connectPromise
+
+    // Start an RPC call
+    const callPromise = stub.exec('ls')
+
+    // Get sent data
+    const sentData = JSON.parse(ws.send.mock.calls[0][0] as string)
+
+    // Simulate response with simple object
+    ws.receiveMessage({
+      id: sentData.id,
+      result: { exitCode: 0, stdout: 'output', stderr: '' },
+    })
+
+    // Test piping to non-existent method
+    const piped = callPromise.pipe('nonExistentMethod', 'arg1', 42)
+    await expect(piped).rejects.toThrow('Method nonExistentMethod not found on result')
+
+    session.disconnect()
+  })
+})
+
+describe('WebSocket lifecycle', () => {
+  beforeEach(() => {
+    MockWebSocket.clear()
+  })
+
+  it('cleans up on close', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+    })
+
+    // Connect the session
+    await connectWithMock(session)
+    expect(session.state).toBe('connected')
+
+    // Manually trigger close
+    session.disconnect()
+
+    expect(session.state).toBe('disconnected')
+  })
+
+  it('cleans up on error', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+    })
+
+    // Start connection
+    const connectPromise = session.connect()
+
+    // Get the WebSocket instance
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+
+    // Wait for handlers to be set up
+    await Promise.resolve()
+
+    // Simulate an error
+    ws.simulateError(new Error('Connection failed'))
+
+    // Connect should fail and clean up
+    await connectPromise.catch(() => {})
+
+    // State should be error or disconnected
+    expect(['disconnected', 'error']).toContain(session.state)
+  })
+
+  it('cleans up WebSocket handlers on disconnect to prevent memory leaks', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+    })
+
+    // Connect the session
+    await connectWithMock(session)
+
+    // Get the WebSocket instance
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+
+    // Disconnect
+    session.disconnect()
+
+    // Verify handlers are cleaned up (null)
+    expect(ws.onopen).toBeNull()
+    expect(ws.onclose).toBeNull()
+    expect(ws.onerror).toBeNull()
+    expect(ws.onmessage).toBeNull()
+  })
+
+  it('cleans up WebSocket handlers on close event to prevent memory leaks', async () => {
+    const session = createRpcSession<ClaudeSandboxRpc>({
+      url: 'wss://test.com/rpc',
+    })
+
+    // Connect the session
+    await connectWithMock(session)
+
+    // Get the WebSocket instance
+    const ws = MockWebSocket.getLatest()
+    if (!ws) throw new Error('No WebSocket instance created')
+
+    // Simulate close event from server
+    ws.simulateClose()
+
+    // Verify handlers are cleaned up (null)
+    expect(ws.onopen).toBeNull()
+    expect(ws.onclose).toBeNull()
+    expect(ws.onerror).toBeNull()
+    expect(ws.onmessage).toBeNull()
   })
 })

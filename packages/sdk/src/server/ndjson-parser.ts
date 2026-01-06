@@ -8,9 +8,14 @@ import type {
   SDKMessage,
   SDKAssistantMessage,
   SDKResultMessage,
+} from '../types/messages.js'
+import {
   isAssistantMessage,
   isToolUseBlock,
-} from '../types/messages.js'
+  validateTodoWriteInput,
+  validateExitPlanModeInput,
+  validateWriteToolInput
+} from '../types/guards.js'
 import type { TodoItem, TodoUpdate, PlanUpdate } from '../types/events.js'
 
 /**
@@ -67,9 +72,9 @@ export class NDJSONParser {
         if (validated) {
           messages.push(validated)
         }
-      } catch (error) {
-        // Log but continue parsing other lines
-        console.warn(`NDJSON parse error at line ${this.lineNumber}:`, error)
+      } catch {
+        // Don't log every parse error - could be partial line or garbage
+        // Just silently skip invalid JSON and continue
       }
     }
 
@@ -77,8 +82,21 @@ export class NDJSONParser {
   }
 
   /**
+   * Valid result subtypes for SDKResultMessage validation.
+   */
+  private static readonly VALID_RESULT_SUBTYPES = [
+    'success',
+    'error_max_turns',
+    'error_during_execution',
+    'error_max_budget_usd',
+    'error_max_structured_output_retries'
+  ] as const
+
+  /**
    * Validate and type a parsed message
    * Returns null if validation fails but logs warning
+   *
+   * IMPORTANT: Schema validation happens BEFORE casting to ensure type safety
    */
   private validate(data: unknown): SDKMessage | null {
     if (!data || typeof data !== 'object') {
@@ -93,18 +111,151 @@ export class NDJSONParser {
       return null
     }
 
-    // Basic type checking based on message type
+    // Validate schema based on message type BEFORE casting
     switch (obj.type) {
-      case 'system':
       case 'assistant':
+        return this.validateAssistantMessage(obj)
       case 'user':
+        return this.validateUserMessage(obj)
+      case 'system':
+        return this.validateSystemMessage(obj)
       case 'result':
+        return this.validateResultMessage(obj)
       case 'stream_event':
-        return data as SDKMessage
+        return this.validateStreamEventMessage(obj)
       default:
         console.warn(`Unknown message type: ${obj.type}`)
-        return data as SDKMessage // Return anyway, let consumers handle
+        return null // Unknown types are invalid - don't return unvalidated data
     }
+  }
+
+  /**
+   * Validate assistant message schema before casting
+   */
+  private validateAssistantMessage(obj: Record<string, unknown>): SDKMessage | null {
+    // Check session_id exists
+    if (typeof obj.session_id !== 'string') {
+      console.warn('Assistant message missing session_id:', obj)
+      return null
+    }
+
+    // Check message object exists
+    const message = obj.message
+    if (!message || typeof message !== 'object') {
+      console.warn('Assistant message missing message object:', obj)
+      return null
+    }
+
+    const msgObj = message as Record<string, unknown>
+
+    // Check message.role is 'assistant'
+    if (msgObj.role !== 'assistant') {
+      console.warn('Assistant message has wrong role:', obj)
+      return null
+    }
+
+    // Check message.content is an array
+    if (!Array.isArray(msgObj.content)) {
+      console.warn('Assistant message content is not an array:', obj)
+      return null
+    }
+
+    return obj as unknown as SDKMessage
+  }
+
+  /**
+   * Validate user message schema before casting
+   */
+  private validateUserMessage(obj: Record<string, unknown>): SDKMessage | null {
+    // Check session_id exists
+    if (typeof obj.session_id !== 'string') {
+      console.warn('User message missing session_id:', obj)
+      return null
+    }
+
+    // Check message object exists
+    const message = obj.message
+    if (!message || typeof message !== 'object') {
+      console.warn('User message missing message object:', obj)
+      return null
+    }
+
+    const msgObj = message as Record<string, unknown>
+
+    // Check message.role is 'user'
+    if (msgObj.role !== 'user') {
+      console.warn('User message has wrong role:', obj)
+      return null
+    }
+
+    // Check message.content is a string or array
+    const content = msgObj.content
+    if (typeof content !== 'string' && !Array.isArray(content)) {
+      console.warn('User message content is not a string or array:', obj)
+      return null
+    }
+
+    return obj as unknown as SDKMessage
+  }
+
+  /**
+   * Validate system message schema before casting
+   */
+  private validateSystemMessage(obj: Record<string, unknown>): SDKMessage | null {
+    // Check session_id exists
+    if (typeof obj.session_id !== 'string') {
+      console.warn('System message missing session_id:', obj)
+      return null
+    }
+
+    // Check subtype is valid ('init' or 'compact_boundary')
+    const subtype = obj.subtype
+    if (subtype !== 'init' && subtype !== 'compact_boundary') {
+      console.warn('System message has invalid subtype:', obj)
+      return null
+    }
+
+    return obj as unknown as SDKMessage
+  }
+
+  /**
+   * Validate result message schema before casting
+   */
+  private validateResultMessage(obj: Record<string, unknown>): SDKMessage | null {
+    // Check session_id exists
+    if (typeof obj.session_id !== 'string') {
+      console.warn('Result message missing session_id:', obj)
+      return null
+    }
+
+    // Check subtype is valid
+    const subtype = obj.subtype
+    if (typeof subtype !== 'string' || !NDJSONParser.VALID_RESULT_SUBTYPES.includes(subtype as typeof NDJSONParser.VALID_RESULT_SUBTYPES[number])) {
+      console.warn('Result message has invalid subtype:', obj)
+      return null
+    }
+
+    // Check usage object exists
+    const usage = obj.usage
+    if (!usage || typeof usage !== 'object') {
+      console.warn('Result message missing usage object:', obj)
+      return null
+    }
+
+    return obj as unknown as SDKMessage
+  }
+
+  /**
+   * Validate stream_event message schema before casting
+   */
+  private validateStreamEventMessage(obj: Record<string, unknown>): SDKMessage | null {
+    // Check session_id exists
+    if (typeof obj.session_id !== 'string') {
+      console.warn('Stream event message missing session_id:', obj)
+      return null
+    }
+
+    return obj as unknown as SDKMessage
   }
 
   /**
@@ -148,7 +299,8 @@ export class NDJSONParser {
 /**
  * Extract todo updates from a stream of messages
  *
- * Finds TodoWrite tool uses and extracts todo items
+ * Finds TodoWrite tool uses and extracts todo items.
+ * Uses validateTodoWriteInput to ensure type safety.
  */
 export function extractTodoUpdates(messages: SDKMessage[]): TodoUpdate[] {
   const updates: TodoUpdate[] = []
@@ -161,11 +313,11 @@ export function extractTodoUpdates(messages: SDKMessage[]): TodoUpdate[] {
 
     for (const block of assistantMsg.message.content) {
       if (block.type === 'tool_use' && block.name === 'TodoWrite') {
-        const input = block.input as { todos?: TodoItem[] }
+        const validated = validateTodoWriteInput(block.input)
 
-        if (input.todos && Array.isArray(input.todos)) {
+        if (validated) {
           updates.push({
-            todos: input.todos,
+            todos: validated.todos as TodoItem[],
             timestamp: new Date().toISOString(),
             messageUuid: msg.uuid,
             sessionId: msg.session_id,
@@ -179,7 +331,8 @@ export function extractTodoUpdates(messages: SDKMessage[]): TodoUpdate[] {
 }
 
 /**
- * Extract plan updates from ExitPlanMode tool use or plan file writes
+ * Extract plan updates from ExitPlanMode tool use or plan file writes.
+ * Uses validateExitPlanModeInput and validateWriteToolInput to ensure type safety.
  */
 export function extractPlanUpdates(messages: SDKMessage[]): PlanUpdate[] {
   const updates: PlanUpdate[] = []
@@ -194,22 +347,24 @@ export function extractPlanUpdates(messages: SDKMessage[]): PlanUpdate[] {
       if (block.type === 'tool_use') {
         // Check for ExitPlanMode tool
         if (block.name === 'ExitPlanMode') {
-          const input = block.input as { plan?: string }
-          updates.push({
-            plan: input.plan ?? '',
-            timestamp: new Date().toISOString(),
-            messageUuid: msg.uuid,
-            sessionId: msg.session_id,
-          })
+          const validated = validateExitPlanModeInput(block.input)
+          if (validated) {
+            updates.push({
+              plan: validated.plan ?? '',
+              timestamp: new Date().toISOString(),
+              messageUuid: msg.uuid,
+              sessionId: msg.session_id,
+            })
+          }
         }
 
         // Also check for Write tool to .claude/plans/*.md files
         if (block.name === 'Write') {
-          const input = block.input as { file_path?: string; content?: string }
-          if (input.file_path?.includes('.claude/plans/') && input.file_path.endsWith('.md')) {
+          const validated = validateWriteToolInput(block.input)
+          if (validated && validated.file_path?.includes('.claude/plans/') && validated.file_path.endsWith('.md')) {
             updates.push({
-              plan: input.content ?? '',
-              planFile: input.file_path,
+              plan: validated.content ?? '',
+              planFile: validated.file_path,
               timestamp: new Date().toISOString(),
               messageUuid: msg.uuid,
               sessionId: msg.session_id,

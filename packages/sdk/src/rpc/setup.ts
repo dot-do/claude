@@ -61,6 +61,12 @@ export class MockWebSocket {
     this.onerror?.(error ?? new Error('Connection failed'))
   }
 
+  // Helper to simulate close event from server
+  simulateClose(): void {
+    this.readyState = 3 // CLOSED
+    this.onclose?.()
+  }
+
   // Helper to simulate receiving a message
   receiveMessage(data: unknown): void {
     this.onmessage?.({ data: JSON.stringify(data) })

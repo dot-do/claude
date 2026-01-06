@@ -5,9 +5,10 @@
  * Configured via URL parameters for flexibility.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Terminal, FileTree, Layout, ThemeProvider, useTheme, type FileNode, type ThemeMode } from '../components'
 import type { TerminalMessage } from '../embed/types'
+import { parseOriginConfig, createSecureMessageHandler, type PostMessageOriginConfig } from '../utils/cors'
 
 /**
  * Theme toggle button component
@@ -42,9 +43,18 @@ function TerminalApp() {
   const showBottom = params.get('bottom') === 'true'
   const title = params.get('title') || 'Terminal'
 
+  // Parse origin configuration for postMessage security
+  const originConfig = useMemo<PostMessageOriginConfig>(
+    () => parseOriginConfig(window.location.search),
+    []
+  )
+
   const [connected, setConnected] = useState(false)
-  const [files, setFiles] = useState<FileNode[]>([])
+  const [files, _setFiles] = useState<FileNode[]>([])
   const [selectedFile, setSelectedFile] = useState<string | undefined>()
+
+  // Note: _setFiles will be used when file loading is implemented
+  void _setFiles
 
   // Build WebSocket URL
   const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/${sessionId}`
@@ -56,18 +66,31 @@ function TerminalApp() {
     }
   }, [])
 
-  // Handle incoming messages from parent window
+  // Handle incoming messages from parent window with origin validation
   useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
+    const handleValidMessage = (event: MessageEvent) => {
       if (event.data?.type === 'terminal:input') {
         // Input will be handled by Terminal component via its WebSocket
         console.log('Received input from parent:', event.data.data)
       }
     }
 
-    window.addEventListener('message', handleMessage)
-    return () => window.removeEventListener('message', handleMessage)
-  }, [])
+    const handleRejectedOrigin = (origin: string, _data: unknown) => {
+      console.warn(
+        `postMessage rejected from untrusted origin: "${origin}". ` +
+          `Configure allowed origins via ?allowedOrigin= or ?allowedOrigins= URL parameter.`
+      )
+    }
+
+    const secureHandler = createSecureMessageHandler(
+      originConfig,
+      handleValidMessage,
+      handleRejectedOrigin
+    )
+
+    window.addEventListener('message', secureHandler)
+    return () => window.removeEventListener('message', secureHandler)
+  }, [originConfig])
 
   const handleConnect = useCallback(() => {
     setConnected(true)
@@ -79,7 +102,7 @@ function TerminalApp() {
     notifyParent({ type: 'terminal:disconnected' })
   }, [notifyParent])
 
-  const handleError = useCallback((error: Event) => {
+  const handleError = useCallback((_error: Event) => {
     notifyParent({ type: 'terminal:error', error: 'WebSocket error' })
   }, [notifyParent])
 

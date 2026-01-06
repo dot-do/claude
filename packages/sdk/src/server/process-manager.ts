@@ -5,30 +5,8 @@
  * (Baseline #1 requirement)
  */
 
-/**
- * Sandbox interface (matches @cloudflare/sandbox)
- */
-interface Sandbox {
-  exec(
-    command: string,
-    options?: { timeout?: number; env?: Record<string, string> }
-  ): Promise<{
-    exitCode: number
-    stdout?: string
-    stderr?: string
-  }>
-  startProcess(
-    command: string,
-    options?: { env?: Record<string, string> }
-  ): Promise<Process>
-  writeFile(path: string, content: string | Uint8Array): Promise<void>
-  readFile(path: string): Promise<string>
-}
-
-interface Process {
-  id: string
-  waitForPort(port: number, options?: { timeout?: number }): Promise<void>
-}
+import { escapeShellArg } from '../utils/shell.js'
+import type { Sandbox } from '../types/sandbox.js'
 
 /**
  * Managed process state
@@ -184,9 +162,9 @@ export class ProcessManager {
     formatted += '\n'
 
     // Write to pipe using echo
-    // Escape single quotes in the data
-    const escaped = formatted.replace(/'/g, "'\\''")
-    await this.sandbox.exec(`echo '${escaped}' >> ${managed.inputPipe}`, {
+    // Safely escape for shell injection protection
+    const escaped = escapeShellArg(formatted)
+    await this.sandbox.exec(`echo ${escaped} >> ${managed.inputPipe}`, {
       timeout: 5000,
     })
 

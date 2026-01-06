@@ -123,3 +123,35 @@ export { TypedEventEmitter, EventKeys, sessionEvent, getGlobalEmitter, resetGlob
 // ============================================================================
 export { TerminalProxy, createTerminalProxy } from './terminal/websocket-proxy.js'
 export type { XtermInput, XtermOutput, TerminalProxyOptions } from './terminal/websocket-proxy.js'
+
+// ============================================================================
+// Re-export authentication middleware
+// ============================================================================
+export {
+  AuthMiddleware,
+  createAuthMiddleware,
+  ApiKeyAuthenticator,
+  JwtAuthenticator,
+  RateLimiter,
+  AuthenticationError,
+  AuthorizationError,
+  RateLimitError,
+} from './middleware/index.js'
+export type {
+  JwtAlgorithm,
+  JwtConfig,
+  RateLimitConfig,
+  RateLimitStorage,
+  ApiKeyValidator,
+  ApiKeyValidationResult,
+  JwtValidationResult,
+  AuthConfig,
+  AuthResult,
+  RateLimitResult,
+  NextFunction,
+} from './middleware/index.js'
+
+// ============================================================================
+// Re-export file operations
+// ============================================================================
+export { readFile, writeFile, listFiles } from './utils/file-ops.js'

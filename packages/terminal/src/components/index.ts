@@ -52,3 +52,4 @@ export {
   type ResolvedTheme,
   type ThemeColors,
 } from './ThemeProvider'
+export { ErrorBoundary } from './ErrorBoundary'

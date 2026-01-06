@@ -207,35 +207,5 @@ export interface McpServerStatus {
 // ============================================================================
 // Type Guards
 // ============================================================================
-
-export function isAssistantMessage(msg: SDKMessage): msg is SDKAssistantMessage {
-  return msg.type === 'assistant'
-}
-
-export function isUserMessage(msg: SDKMessage): msg is SDKUserMessage {
-  return msg.type === 'user'
-}
-
-export function isSystemMessage(msg: SDKMessage): msg is SDKSystemMessage {
-  return msg.type === 'system'
-}
-
-export function isResultMessage(msg: SDKMessage): msg is SDKResultMessage {
-  return msg.type === 'result'
-}
-
-export function isPartialMessage(msg: SDKMessage): msg is SDKPartialMessage {
-  return msg.type === 'stream_event'
-}
-
-export function isToolUseBlock(block: ContentBlock): block is ToolUseBlock {
-  return block.type === 'tool_use'
-}
-
-export function isToolResultBlock(block: ContentBlock): block is ToolResultBlock {
-  return block.type === 'tool_result'
-}
-
-export function isTextBlock(block: ContentBlock): block is TextBlock {
-  return block.type === 'text'
-}
+// Note: Full-validation type guards are in guards.ts
+// These are re-exported from guards.ts via index.ts

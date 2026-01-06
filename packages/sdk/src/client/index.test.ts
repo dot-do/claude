@@ -278,3 +278,16 @@ describe('ClaudeClientError', () => {
     expect(error.errorId).toBe('err-abc123')
   })
 })
+
+describe('RpcStub type safety', () => {
+  it('stub methods return RpcPromise', async () => {
+    // Type test - if this compiles, the types work
+    const client = new ClaudeClient({ url: 'ws://test' })
+    // Connect first to initialize the stub
+    await client.connect()
+    // @ts-expect-error - accessing private for test
+    const stub = client.stub
+    // Methods should exist and return promises
+    expect(typeof stub?.createSession).toBe('function')
+  })
+})
