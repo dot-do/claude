@@ -4,28 +4,28 @@
   "description": "SDK for Claude Code web experience - typed client and Cloudflare sandbox helpers",
   "type": "module",
   "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
+  "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     },
     "./client": {
       "types": "./dist/client/index.d.ts",
-      "import": "./dist/client/index.mjs",
-      "require": "./dist/client/index.js"
+      "import": "./dist/client/index.js",
+      "require": "./dist/client/index.cjs"
     },
     "./server": {
       "types": "./dist/server/index.d.ts",
-      "import": "./dist/server/index.mjs",
-      "require": "./dist/server/index.js"
+      "import": "./dist/server/index.js",
+      "require": "./dist/server/index.cjs"
     },
     "./rpc": {
       "types": "./dist/rpc/index.d.ts",
-      "import": "./dist/rpc/index.mjs",
-      "require": "./dist/rpc/index.js"
+      "import": "./dist/rpc/index.js",
+      "require": "./dist/rpc/index.cjs"
     }
   },
   "files": [
