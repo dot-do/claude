@@ -27,6 +27,6 @@
  * ```
  */
 
-export { Terminal, type TerminalProps, type TerminalTheme } from './Terminal'
+export { Terminal, type TerminalProps, type TerminalTheme, type TerminalRef } from './Terminal'
 export { FileTree, type FileTreeProps, type FileNode } from './FileTree'
 export { Layout, type LayoutProps } from './Layout'

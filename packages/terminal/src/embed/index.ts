@@ -37,7 +37,7 @@
  * ```
  */
 
-export { TerminalEmbed, type TerminalEmbedProps } from './TerminalEmbed'
+export { TerminalEmbed, type TerminalEmbedProps, type TerminalEmbedRef } from './TerminalEmbed'
 export type {
   TerminalMessage,
   TerminalInputMessage,

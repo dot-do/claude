@@ -5,7 +5,7 @@
  * postMessage communication.
  */
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 import type {
   TerminalMessage,
   TerminalInputMessage,
@@ -47,7 +47,11 @@ export interface TerminalEmbedProps {
   sandbox?: string
 }
 
-export function TerminalEmbed({
+export interface TerminalEmbedRef {
+  sendInput: (data: string) => void
+}
+
+export const TerminalEmbed = forwardRef<TerminalEmbedRef, TerminalEmbedProps>(function TerminalEmbed({
   src,
   sessionId,
   params = {},
@@ -62,7 +66,7 @@ export function TerminalEmbed({
   title = 'Terminal',
   allowClipboard = true,
   sandbox = 'allow-scripts allow-same-origin allow-forms',
-}: TerminalEmbedProps) {
+}, ref) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
   // Build iframe URL
@@ -126,6 +130,11 @@ export function TerminalEmbed({
     }
   }, [src])
 
+  // Expose methods via ref
+  useImperativeHandle(ref, () => ({
+    sendInput,
+  }), [sendInput])
+
   // Build allow attribute
   const allow = [
     allowClipboard && 'clipboard-read',
@@ -150,6 +159,6 @@ export function TerminalEmbed({
       }}
     />
   )
-}
+})
 
 export default TerminalEmbed

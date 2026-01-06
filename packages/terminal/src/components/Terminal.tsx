@@ -5,7 +5,7 @@
  * Can be used standalone or embedded in any React app.
  */
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
@@ -58,13 +58,20 @@ export interface TerminalProps {
   className?: string
 }
 
+export interface TerminalRef {
+  write: (text: string) => void
+  clear: () => void
+  focus: () => void
+  fit: () => void
+}
+
 const defaultTheme: TerminalTheme = {
   background: '#000000',
   foreground: '#ffffff',
   cursor: '#ffffff',
 }
 
-export function Terminal({
+export const Terminal = forwardRef<TerminalRef, TerminalProps>(function Terminal({
   wsUrl,
   onData,
   onResize,
@@ -79,7 +86,7 @@ export function Terminal({
   autoFocus = false,
   ariaLabel = 'Terminal',
   className = '',
-}: TerminalProps) {
+}, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -214,7 +221,7 @@ export function Terminal({
     }
   }, [data])
 
-  // Expose methods
+  // Expose methods via ref
   const write = useCallback((text: string) => {
     terminalRef.current?.write(text)
   }, [])
@@ -231,6 +238,13 @@ export function Terminal({
     fitAddonRef.current?.fit()
   }, [])
 
+  useImperativeHandle(ref, () => ({
+    write,
+    clear,
+    focus,
+    fit,
+  }), [write, clear, focus, fit])
+
   return (
     <div
       ref={containerRef}
@@ -243,6 +257,6 @@ export function Terminal({
       tabIndex={0}
     />
   )
-}
+})
 
 export default Terminal
