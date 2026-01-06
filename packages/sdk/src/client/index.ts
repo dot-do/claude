@@ -6,6 +6,9 @@
 
 export { ReconnectionPolicy, type ReconnectionOptions } from './reconnect.js'
 
+// Runtime-agnostic session management
+export { ClaudeSession, type ClaudeSessionOptions, type ClaudeSessionStatus } from './session.js'
+
 import { RpcTarget } from 'capnweb'
 import {
   validateCapnwebModule,

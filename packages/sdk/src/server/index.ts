@@ -7,8 +7,15 @@
 // Main ClaudeCode Durable Object
 export { ClaudeCode, getSandbox } from './claude-code.js'
 
-// Re-export Sandbox types from canonical location
-export type { Sandbox, SandboxNamespace } from '../types/sandbox.js'
+// Re-export Runtime types from canonical location (preferred)
+export type { Runtime, RuntimeProcess, ExecResult, ExecOptions, ProcessOptions } from '../types/runtime.js'
+export { isExecResult } from '../types/runtime.js'
+
+// Re-export Cloudflare types (preferred naming)
+export type { CloudflareRuntime, CloudflareProcess, CloudflareNamespace } from '../types/sandbox.js'
+
+// Re-export deprecated Sandbox types for backward compatibility
+export type { Sandbox, SandboxProcess, SandboxNamespace } from '../types/sandbox.js'
 
 // NDJSON Parser
 export {

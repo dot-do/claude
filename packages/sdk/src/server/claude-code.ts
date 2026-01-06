@@ -39,7 +39,7 @@ import type {
   PermissionMode,
   SessionStatus,
 } from '../types/options.js'
-import type { Sandbox, SandboxNamespace } from '../types/sandbox.js'
+import type { CloudflareRuntime, CloudflareNamespace, Sandbox, SandboxNamespace } from '../types/sandbox.js'
 import { NDJSONParser, extractTodoUpdates, extractPlanUpdates } from './ndjson-parser.js'
 import { ProcessManager, buildCliArgs } from './process-manager.js'
 import { TypedEventEmitter, EventKeys } from '../events/emitter.js'
@@ -47,9 +47,35 @@ import { AsyncMutex } from '../utils/mutex.js'
 import { validateSandboxNamespace } from '../utils/module-validation.js'
 
 /**
- * Get sandbox instance
+ * Get CloudflareRuntime instance from namespace
+ *
+ * This helper retrieves a runtime instance from the Cloudflare namespace.
+ * The function name uses "Sandbox" for backward compatibility, but internally
+ * works with CloudflareRuntime.
+ *
+ * @param namespace - CloudflareNamespace (or SandboxNamespace alias)
+ * @param id - Unique identifier for the runtime instance
+ * @returns CloudflareRuntime instance
+ *
+ * @example Using CloudflareRuntime (preferred)
+ * ```typescript
+ * import type { CloudflareNamespace } from '@dotdo/claude'
+ *
+ * const namespace: CloudflareNamespace = env.Sandbox
+ * const runtime = getSandbox(namespace, sessionId)
+ * await runtime.exec('npm install')
+ * ```
+ *
+ * @example Using Sandbox (backward compatible)
+ * ```typescript
+ * import type { SandboxNamespace } from '@dotdo/claude'
+ *
+ * const namespace: SandboxNamespace = env.Sandbox
+ * const sandbox = getSandbox(namespace, sessionId)
+ * await sandbox.exec('npm install')
+ * ```
  */
-function getSandbox(namespace: SandboxNamespace, id: string): Sandbox {
+function getSandbox(namespace: CloudflareNamespace, id: string): CloudflareRuntime {
   return namespace.get(id)
 }
 
@@ -116,7 +142,13 @@ function getSandbox(namespace: SandboxNamespace, id: string): Sandbox {
 export class ClaudeCode extends RpcTarget implements DurableObject {
   private state: DurableObjectState
   private env: ClaudeCodeEnv
-  private sandbox: Sandbox | null = null
+  /**
+   * CloudflareRuntime instance for executing commands in the sandbox
+   *
+   * Note: The property name "sandbox" is preserved for backward compatibility,
+   * but the type is CloudflareRuntime (Sandbox is a deprecated type alias).
+   */
+  private sandbox: CloudflareRuntime | null = null
   private sessions: Map<string, ClaudeSession> = new Map()
   private processManager: ProcessManager | null = null
   private parser: NDJSONParser
@@ -493,10 +525,12 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
 
   /**
    * Spawn Claude CLI process with PTY for interactive streaming
+   *
+   * Uses CloudflareRuntime to start the process in the sandbox environment.
    */
   private async spawnClaudeProcess(session: ClaudeSession): Promise<void> {
     if (!this.sandbox) {
-      throw new Error('Sandbox not initialized')
+      throw new Error('CloudflareRuntime not initialized')
     }
 
     if (!this.processManager) {
@@ -566,11 +600,13 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
 
   /**
    * Stream process output and parse NDJSON
+   *
+   * Uses CloudflareRuntime.streamProcessLogs to read process output.
    */
   private async streamProcessOutput(sessionId: string, processId: string): Promise<void> {
     if (!this.sandbox?.streamProcessLogs) {
       // Fallback: poll for output if streaming not available
-      console.warn('Sandbox does not support streamProcessLogs, output streaming disabled')
+      console.warn('CloudflareRuntime does not support streamProcessLogs, output streaming disabled')
       return
     }
 
@@ -868,4 +904,5 @@ export class ClaudeCode extends RpcTarget implements DurableObject {
 
 // Re-export for convenience
 export { getSandbox }
-// Note: Sandbox and SandboxNamespace types are exported from '../types/sandbox.js'
+// Types: CloudflareRuntime (preferred) and Sandbox (deprecated alias) are exported from '../types/sandbox.js'
+// See: CloudflareRuntime, CloudflareNamespace, CloudflareProcess for canonical type names

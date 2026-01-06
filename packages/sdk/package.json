@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "SDK for Claude Code web experience - typed client and Cloudflare sandbox helpers",
   "type": "module",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -26,6 +26,31 @@
       "types": "./dist/rpc/index.d.ts",
       "import": "./dist/rpc/index.js",
       "require": "./dist/rpc/index.cjs"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js",
+      "require": "./dist/types/index.cjs"
+    },
+    "./runtimes": {
+      "types": "./dist/runtimes/index.d.ts",
+      "import": "./dist/runtimes/index.js",
+      "require": "./dist/runtimes/index.cjs"
+    },
+    "./bun": {
+      "types": "./dist/runtimes/bun.d.ts",
+      "import": "./dist/runtimes/bun.js",
+      "require": "./dist/runtimes/bun.cjs"
+    },
+    "./cloudflare": {
+      "types": "./dist/runtimes/cloudflare.d.ts",
+      "import": "./dist/runtimes/cloudflare.js",
+      "require": "./dist/runtimes/cloudflare.cjs"
+    },
+    "./node": {
+      "types": "./dist/runtimes/node.d.ts",
+      "import": "./dist/runtimes/node.js",
+      "require": "./dist/runtimes/node.cjs"
     }
   },
   "files": [
@@ -45,6 +70,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20251221.0",
+    "@types/bun": "^1.3.5",
     "@types/node": "^22.0.0",
     "glob": "^13.0.0",
     "gray-matter": "^4.0.3",

@@ -4,6 +4,23 @@
  * SDK for Claude Code - provides typed client, Cloudflare Durable Object,
  * and capnweb RPC integration for building Claude Code-powered applications.
  *
+ * ## Subpath Exports
+ *
+ * This package supports multiple subpath exports for tree-shaking and
+ * runtime-specific imports:
+ *
+ * | Subpath | Description |
+ * |---------|-------------|
+ * | `@dotdo/claude` | Main entry - all exports |
+ * | `@dotdo/claude/client` | Client-side SDK |
+ * | `@dotdo/claude/server` | Server-side SDK (Cloudflare Workers) |
+ * | `@dotdo/claude/rpc` | RPC utilities (capnweb) |
+ * | `@dotdo/claude/types` | TypeScript types only |
+ * | `@dotdo/claude/runtimes` | All runtime adapters |
+ * | `@dotdo/claude/bun` | Bun runtime |
+ * | `@dotdo/claude/cloudflare` | Cloudflare runtime |
+ * | `@dotdo/claude/node` | Node.js runtime |
+ *
  * @example Browser/Client usage
  * ```ts
  * import { ClaudeClient, createClaudeClient } from '@dotdo/claude'
@@ -49,6 +66,14 @@
  * await stub.sendMessage(claudeSession.id, 'Hello!')
  * ```
  *
+ * @example Runtime-specific imports
+ * ```ts
+ * // Import only what you need for your runtime
+ * import { BunRuntime } from '@dotdo/claude/bun'
+ * import { NodeRuntime } from '@dotdo/claude/node'
+ * import { CloudflareRuntimeAdapter } from '@dotdo/claude/cloudflare'
+ * ```
+ *
  * @packageDocumentation
  */
 
@@ -60,8 +85,16 @@ export * from './types/index.js'
 // ============================================================================
 // Re-export client
 // ============================================================================
-export { ClaudeClient, ClaudeClientError, createClaudeClient } from './client/index.js'
-export type { CreateSessionOptions, SendMessageOptions, ListFilesOptions, SearchOptions } from './client/index.js'
+export { ClaudeClient, ClaudeClientError, createClaudeClient, ClaudeSession, ReconnectionPolicy } from './client/index.js'
+export type {
+  CreateSessionOptions,
+  SendMessageOptions,
+  ListFilesOptions,
+  SearchOptions,
+  ClaudeSessionOptions,
+  ClaudeSessionStatus,
+  ReconnectionOptions,
+} from './client/index.js'
 
 // ============================================================================
 // Re-export server helpers (for Cloudflare Workers)
@@ -83,7 +116,24 @@ export {
   isComplete,
   hasError,
 } from './server/index.js'
-export type { ClaudeServer, Sandbox, SandboxNamespace } from './server/index.js'
+export type {
+  ClaudeServer,
+  // Generic Runtime types (from runtime.ts)
+  Runtime,
+  RuntimeProcess,
+  ExecResult,
+  ExecOptions,
+  ProcessOptions,
+  // Cloudflare types (preferred naming)
+  CloudflareRuntime,
+  CloudflareProcess,
+  CloudflareNamespace,
+  // Deprecated Sandbox types (backward compat)
+  Sandbox,
+  SandboxProcess,
+  SandboxNamespace,
+} from './server/index.js'
+export { isExecResult } from './server/index.js'
 
 // ============================================================================
 // Re-export RPC helpers
@@ -97,6 +147,7 @@ export {
   createRpcHandler,
   createRpcServer,
   RpcError,
+  RpcTimeoutError,
   ErrorCodes,
 } from './rpc/index.js'
 export type {
@@ -121,8 +172,8 @@ export { TypedEventEmitter, EventKeys, sessionEvent, getGlobalEmitter, resetGlob
 // ============================================================================
 // Re-export terminal proxy
 // ============================================================================
-export { TerminalProxy, createTerminalProxy } from './terminal/websocket-proxy.js'
-export type { XtermInput, XtermOutput, TerminalProxyOptions } from './terminal/websocket-proxy.js'
+export { TerminalProxy, createTerminalProxy, ConnectionState } from './terminal/websocket-proxy.js'
+export type { XtermInput, XtermOutput, TerminalProxyOptions, ConnectionStateCallback } from './terminal/websocket-proxy.js'
 
 // ============================================================================
 // Re-export authentication middleware
@@ -155,3 +206,12 @@ export type {
 // Re-export file operations
 // ============================================================================
 export { readFile, writeFile, listFiles } from './utils/file-ops.js'
+
+// ============================================================================
+// Re-export runtime adapters
+// ============================================================================
+export {
+  createCloudflareRuntime,
+  CloudflareRuntimeAdapter,
+  CloudflareProcessAdapter,
+} from './runtimes/index.js'

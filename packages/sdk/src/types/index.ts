@@ -16,7 +16,10 @@ export * from './options.js'
 // Re-export all type guards
 export * from './guards.js'
 
-// Re-export sandbox types
+// Re-export runtime types (primary interface)
+export * from './runtime.js'
+
+// Re-export sandbox types (deprecated aliases for backward compatibility)
 export * from './sandbox.js'
 
 // ============================================================================
