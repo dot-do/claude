@@ -1,0 +1,504 @@
+---
+title: ClaudeCode Server
+description: Cloudflare Durable Object that wraps Claude Code CLI with capnweb RPC interface for edge-based AI agent sessions
+---
+
+The server module provides a Cloudflare Durable Object implementation that wraps Claude Code CLI with a capnweb RPC interface. It enables persistent, stateful AI agent sessions at the edge with support for interactive streaming, WebSocket connections, and real-time event callbacks.
+
+## Installation
+
+```bash
+npm install @dotdo/claude
+```
+
+## ClaudeCode Durable Object
+
+The `ClaudeCode` class is a Cloudflare Durable Object that manages Claude Code CLI sessions with full RPC capabilities.
+
+### Key Features
+
+- PTY/stdin streaming for interactive input
+- NDJSON stream parsing for real-time updates
+- Todo and Plan update callbacks
+- capnweb RPC exposure
+- WebSocket and SSE support
+- Session persistence via Durable Object storage
+
+### Basic Setup
+
+```typescript title="src/index.ts"
+import { ClaudeCode } from '@dotdo/claude/server'
+
+export { ClaudeCode }
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const id = env.CLAUDE_CODE.idFromName('default')
+    const stub = env.CLAUDE_CODE.get(id)
+    return stub.fetch(request)
+  }
+}
+```
+
+### Wrangler Configuration
+
+```toml title="wrangler.toml"
+name = "claude-agent"
+main = "src/index.ts"
+
+[[durable_objects.bindings]]
+name = "CLAUDE_CODE"
+class_name = "ClaudeCode"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ClaudeCode"]
+
+[vars]
+ANTHROPIC_API_KEY = ""
+```
+
+### RPC Methods
+
+The `ClaudeCode` class exposes these RPC methods that match the Claude Agent SDK API surface:
+
+| Method | Description |
+|--------|-------------|
+| `createSession(options)` | Create a new Claude session |
+| `sendMessage(sessionId, message)` | Send interactive message to session |
+| `query(prompt, options)` | One-shot query with async generator response |
+| `interrupt(sessionId)` | Interrupt current query |
+| `getSession(sessionId)` | Get session information |
+| `resumeSession(sessionId)` | Resume a previous session |
+| `listSessions()` | List all sessions |
+| `destroySession(sessionId)` | Destroy session and cleanup |
+| `supportedModels()` | Get available models |
+| `mcpServerStatus(sessionId)` | Get MCP server connection status |
+| `setPermissionMode(sessionId, mode)` | Change permission mode |
+
+### Event Subscriptions
+
+Subscribe to real-time events from sessions:
+
+```typescript title="event-subscriptions.ts"
+const claude = env.CLAUDE_CODE.get(id)
+
+// Subscribe to todo updates - track task progress
+claude.onTodoUpdate(sessionId, (todos) => {
+  console.log('Todos updated:', todos)
+})
+
+// Subscribe to plan updates - see Claude's execution strategy
+claude.onPlanUpdate(sessionId, (plan) => {
+  console.log('Plan updated:', plan)
+})
+
+// Subscribe to all output - receive streaming text
+claude.onOutput(sessionId, (message) => {
+  console.log('Message:', message.type)
+})
+
+// Subscribe to tool use - monitor file operations, commands, etc.
+claude.onToolUse(sessionId, (toolUse) => {
+  console.log('Tool used:', toolUse.name)
+})
+```
+
+---
+
+## ProcessManager
+
+The `ProcessManager` class manages Claude CLI processes with PTY/stdin streaming for interactive input.
+
+### Features
+
+- Keeps Claude CLI process alive for bidirectional I/O
+- Uses named pipes for stdin when sandbox doesn't expose direct stdin
+- Handles process lifecycle and signals
+- Supports interactive message sending
+
+### Usage
+
+```typescript title="process-manager-usage.ts"
+import { ProcessManager } from '@dotdo/claude/server'
+
+const manager = new ProcessManager(sandbox)
+
+// Spawn interactive Claude process
+const { processId, inputPipe } = await manager.spawnInteractive({
+  sessionId: 'session-123',
+  cwd: '/workspace',
+  args: ['--output-format', 'stream-json'],
+  env: { ANTHROPIC_API_KEY: '...' }
+})
+
+// Send message to running process
+await manager.write('session-123', 'Build a todo app')
+
+// Send follow-up while still running
+await manager.write('session-123', 'Use TypeScript please')
+
+// Interrupt with signal
+await manager.signal('session-123', 'SIGINT')
+
+// Kill process
+await manager.kill('session-123')
+```
+
+### Methods
+
+| Method | Parameters | Description |
+|--------|------------|-------------|
+| `spawnInteractive(options)` | `{ sessionId, cwd, args, env? }` | Spawn an interactive Claude CLI process |
+| `register(sessionId, processId, inputPipe)` | IDs and pipe path | Register an externally spawned process |
+| `isAlive(sessionId)` | Session ID | Check if process is alive |
+| `write(sessionId, data)` | Session ID, message | Write to process stdin (auto-formats as NDJSON) |
+| `writeRaw(sessionId, data)` | Session ID, raw data | Write raw data without formatting |
+| `signal(sessionId, signal)` | Session ID, signal name | Send signal to process |
+| `kill(sessionId)` | Session ID | Kill process and cleanup |
+| `getProcess(sessionId)` | Session ID | Get process info |
+| `markDead(sessionId)` | Session ID | Mark process as dead |
+| `cleanup()` | None | Clean up all processes |
+| `getActiveSessions()` | None | Get all active session IDs |
+| `getStats()` | None | Get process statistics |
+
+---
+
+## NDJSONParser
+
+The `NDJSONParser` class parses Claude Code CLI `--output-format stream-json` output (NDJSON - newline-delimited JSON).
+
+### Usage
+
+```typescript title="ndjson-parser-usage.ts"
+import { NDJSONParser } from '@dotdo/claude/server'
+
+const parser = new NDJSONParser()
+
+// Process chunks as they arrive from the CLI stream
+for (const chunk of chunks) {
+  const messages = parser.parse(chunk)
+  for (const msg of messages) {
+    console.log(msg.type) // 'system' | 'assistant' | 'user' | 'result'
+  }
+}
+
+// Important: Flush any remaining buffered content at end of stream
+const remaining = parser.flush()
+```
+
+### Methods
+
+| Method | Parameters | Returns | Description |
+|--------|------------|---------|-------------|
+| `parse(chunk)` | String chunk | `SDKMessage[]` | Parse a chunk of NDJSON data |
+| `flush()` | None | `SDKMessage[]` | Flush remaining buffer content |
+| `reset()` | None | `void` | Reset parser state |
+| `getLineNumber()` | None | `number` | Get current line number for debugging |
+
+### Helper Functions
+
+The module also exports helper functions for extracting specific data from message streams:
+
+```typescript title="parser-helpers.ts"
+import {
+  extractTodoUpdates,
+  extractPlanUpdates,
+  extractToolUses,
+  extractResult,
+  extractSessionId,
+  isComplete,
+  hasError
+} from '@dotdo/claude/server'
+
+// Extract todo updates from TodoWrite tool uses
+const todoUpdates = extractTodoUpdates(messages)
+
+// Extract plan updates from ExitPlanMode or plan file writes
+const planUpdates = extractPlanUpdates(messages)
+
+// Extract all tool use events
+const toolUses = extractToolUses(messages)
+
+// Get the result message
+const result = extractResult(messages)
+
+// Get session ID from init message
+const sessionId = extractSessionId(messages)
+
+// Check completion status
+if (isComplete(messages)) {
+  console.log('Session complete')
+}
+
+// Check for errors
+if (hasError(messages)) {
+  console.log('Session had errors')
+}
+```
+
+---
+
+## Sandbox Interface
+
+The `Sandbox` interface matches the `@cloudflare/sandbox` API for executing commands and managing processes in isolated environments.
+
+```typescript title="sandbox-interface.ts"
+interface Sandbox {
+  // Execute a command and wait for it to complete
+  exec(
+    command: string,
+    options?: { timeout?: number; env?: Record<string, string> }
+  ): Promise<{
+    exitCode: number
+    stdout?: string
+    stderr?: string
+  }>
+
+  // Start a long-running process
+  startProcess(
+    command: string,
+    options?: { env?: Record<string, string> }
+  ): Promise<{
+    id: string
+    waitForPort(port: number, options?: { timeout?: number }): Promise<void>
+  }>
+
+  // File system operations
+  writeFile(path: string, content: string | Uint8Array): Promise<void>
+  readFile(path: string): Promise<string>
+
+  // Optional methods for advanced use cases
+  streamProcessLogs?(processId: string): Promise<ReadableStream<Uint8Array>>
+  setEnvVars?(vars: Record<string, string>): Promise<void>
+}
+```
+
+### SandboxNamespace Interface
+
+```typescript title="sandbox-namespace.ts"
+interface SandboxNamespace {
+  get(id: string): Sandbox  // Retrieve a sandbox instance by ID
+}
+```
+
+---
+
+## Helper Functions
+
+### getSandbox
+
+Retrieves a sandbox instance from a namespace binding.
+
+```typescript title="get-sandbox.ts"
+import { getSandbox } from '@dotdo/claude/server'
+
+// Get a sandbox for the current session
+const sandbox = getSandbox(env.Sandbox, durableObjectId)
+```
+
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `namespace` | `SandboxNamespace` | Durable Object namespace binding |
+| `id` | `string` | Sandbox instance ID |
+
+**Returns:** `Sandbox`
+
+### buildCliArgs
+
+Builds CLI arguments array for spawning Claude Code.
+
+```typescript title="build-cli-args.ts"
+import { buildCliArgs } from '@dotdo/claude/server'
+
+const args = buildCliArgs({
+  outputFormat: 'stream-json',       // Required for streaming responses
+  inputFormat: 'stream-json',        // Required for interactive input
+  model: 'claude-sonnet-4-20250514',
+  systemPrompt: 'You are a helpful coding assistant',
+  permissionMode: 'acceptEdits',     // Auto-accept file changes
+  maxTurns: 10,                      // Limit conversation turns
+  tools: ['Bash', 'Read', 'Write', 'Edit'],  // Available tools
+  includePartialMessages: true,      // Stream partial responses
+  resume: 'previous-session-id',     // Resume existing session
+  cwd: '/workspace'                  // Working directory
+})
+
+// Result: ['--output-format', 'stream-json', '--input-format', 'stream-json', ...]
+```
+
+**Options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `outputFormat` | `'stream-json' \| 'json' \| 'text'` | CLI output format |
+| `inputFormat` | `'stream-json' \| 'text'` | CLI input format |
+| `model` | `string` | Model to use |
+| `systemPrompt` | `string \| { type: 'preset'; preset: string; append?: string }` | System prompt configuration |
+| `permissionMode` | `string` | Permission mode |
+| `maxTurns` | `number` | Maximum conversation turns |
+| `tools` | `string[] \| { type: 'preset'; preset: string }` | Allowed tools |
+| `mcpServers` | `Record<string, unknown>` | MCP server configurations |
+| `includePartialMessages` | `boolean` | Include partial streaming messages |
+| `resume` | `string` | Session ID to resume |
+| `cwd` | `string` | Working directory |
+
+**Returns:** `string[]` - Array of CLI arguments
+
+---
+
+## Complete Worker Example
+
+```typescript title="src/index.ts"
+import { ClaudeCode, getSandbox, buildCliArgs, NDJSONParser } from '@dotdo/claude/server'
+import type { ClaudeCodeEnv } from '@dotdo/claude/types'
+
+// Export the Durable Object class
+export { ClaudeCode }
+
+export default {
+  async fetch(request: Request, env: ClaudeCodeEnv): Promise<Response> {
+    const url = new URL(request.url)
+
+    // Route to Durable Object
+    if (url.pathname.startsWith('/api/claude')) {
+      const id = env.CLAUDE_CODE.idFromName('default')
+      const stub = env.CLAUDE_CODE.get(id)
+      return stub.fetch(request)
+    }
+
+    // Health check
+    if (url.pathname === '/health') {
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+
+    return new Response('Not Found', { status: 404 })
+  }
+}
+```
+
+## Environment Types
+
+```typescript title="env.d.ts"
+interface Env {
+  CLAUDE_CODE: DurableObjectNamespace      // Durable Object for session management
+  Sandbox: DurableObjectNamespace           // Sandbox for isolated code execution
+  ANTHROPIC_API_KEY?: string                // API key for Anthropic (can also use secrets)
+  SESSION_STORAGE?: KVNamespace             // Optional: persist session data across restarts
+  MESSAGE_BUFFER?: R2Bucket                 // Optional: store large message histories
+}
+```
+
+## TerminalProxy
+
+The `TerminalProxy` class provides WebSocket-to-PTY bridging for xterm.js terminal connections.
+
+```typescript title="terminal-proxy.ts"
+import { TerminalProxy, createTerminalProxy } from '@dotdo/claude'
+
+// Create a terminal proxy
+const proxy = createTerminalProxy(sandbox, {
+  cols: 80,
+  rows: 24,
+  command: 'bash',
+})
+
+// Handle WebSocket connection
+proxy.handleWebSocket(webSocket)
+```
+
+### TerminalProxyOptions
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `cols` | `number` | Terminal columns (default: 80) |
+| `rows` | `number` | Terminal rows (default: 24) |
+| `command` | `string` | Shell command to run |
+| `env` | `Record<string, string>` | Environment variables |
+
+### XtermInput / XtermOutput
+
+```typescript title="xterm-types.ts"
+// Input from xterm.js to server
+interface XtermInput {
+  type: 'input' | 'resize'
+  data?: string      // For input type
+  cols?: number      // For resize type
+  rows?: number      // For resize type
+}
+
+// Output from server to xterm.js
+interface XtermOutput {
+  type: 'output'
+  data: string       // Terminal output data
+}
+```
+
+---
+
+## Deprecated Exports
+
+<Callout type="warning">
+These exports are deprecated and will be removed in a future version. Use the recommended alternatives.
+</Callout>
+
+### createClaudeServer (deprecated)
+
+Use `ClaudeCode` Durable Object instead.
+
+```typescript
+// Deprecated
+import { createClaudeServer } from '@dotdo/claude/server'
+
+// Recommended
+import { ClaudeCode } from '@dotdo/claude/server'
+export { ClaudeCode }
+```
+
+### proxyToClaude (deprecated)
+
+Use `ClaudeCode.fetch()` instead for routing requests.
+
+### cloneRepository (deprecated)
+
+Use sandbox `exec()` with git commands instead:
+
+```typescript
+await sandbox.exec('git clone https://github.com/user/repo.git')
+```
+
+### ClaudeServer type (deprecated)
+
+Use the `ClaudeCode` class type instead.
+
+### ClaudeSandboxRpc type
+
+Low-level RPC interface for sandbox communication. Use `IClaudeCodeRpc` for client-side code.
+
+```typescript title="claude-sandbox-rpc.ts"
+import type { ClaudeSandboxRpc } from '@dotdo/claude/rpc'
+
+// Used internally by RPC layer for sandbox method calls
+type ClaudeSandboxRpc = {
+  exec(command: string): Promise<{ exitCode: number; stdout: string; stderr: string }>
+  readFile(path: string): Promise<string>
+  writeFile(path: string, content: string): Promise<void>
+  listDir(path: string): Promise<string[]>
+  search(query: string, options?: SearchOptions): Promise<SearchResult[]>
+  getDiff(path: string): Promise<string>
+  ptyWrite(data: string): void
+  ptyResize(cols: number, rows: number): void
+}
+```
+
+---
+
+## Related
+
+- [Client SDK](/sdk/client) - Connect to ClaudeCode from the browser
+- [Types Reference](/sdk/types) - TypeScript type definitions
+- [Events](/sdk/events) - Event system and callbacks

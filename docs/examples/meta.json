@@ -1,0 +1,9 @@
+{
+  "title": "Examples",
+  "pages": [
+    "index",
+    "basic-chat",
+    "ide-layout",
+    "embedded-terminal"
+  ]
+}

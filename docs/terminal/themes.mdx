@@ -1,0 +1,349 @@
+---
+title: Theme System
+description: ThemeProvider component and hooks for managing light/dark mode with automatic system preference detection
+---
+
+The theme system provides consistent theming across terminal UI components with support for light mode, dark mode, and automatic system preference detection.
+
+## Installation
+
+The theme system is included in the `@anthropic-ai/claude-code-sdk/terminal` package:
+
+```bash
+npm install @anthropic-ai/claude-code-sdk
+```
+
+## Quick Start
+
+Wrap your application with `ThemeProvider` to enable theming:
+
+```tsx
+import { ThemeProvider, Terminal } from '@anthropic-ai/claude-code-sdk/terminal'
+
+function App() {
+  return (
+    <ThemeProvider defaultMode="system">
+      <Terminal wsUrl="wss://example.com/ws" />
+    </ThemeProvider>
+  )
+}
+```
+
+## ThemeProvider
+
+The `ThemeProvider` component provides theme context to all child components.
+
+### Props
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `children` | `ReactNode` | Required | Child components |
+| `defaultMode` | `ThemeMode` | `'system'` | Initial theme mode |
+| `storageKey` | `string` | `'terminal-ui-theme'` | localStorage key for persisting preference |
+| `forcedTheme` | `ResolvedTheme` | - | Force a specific theme, overriding mode |
+
+### Example
+
+```tsx
+import { ThemeProvider } from '@anthropic-ai/claude-code-sdk/terminal'
+
+function App() {
+  return (
+    <ThemeProvider
+      defaultMode="dark"
+      storageKey="my-app-theme"
+    >
+      {/* Your app content */}
+    </ThemeProvider>
+  )
+}
+```
+
+## useTheme Hook
+
+Access theme state and controls from any component within the provider:
+
+```tsx
+import { useTheme } from '@anthropic-ai/claude-code-sdk/terminal'
+
+function ThemeToggle() {
+  const { theme, mode, toggle, setMode } = useTheme()
+
+  return (
+    <div>
+      <p>Current theme: {theme}</p>
+      <p>Mode setting: {mode}</p>
+      <button onClick={toggle}>Toggle Theme</button>
+      <button onClick={() => setMode('system')}>Use System</button>
+    </div>
+  )
+}
+```
+
+### Return Value
+
+The `useTheme` hook returns a `ThemeContextValue` object:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `mode` | `ThemeMode` | Current mode setting (`'light'`, `'dark'`, or `'system'`) |
+| `theme` | `ResolvedTheme` | Resolved theme (`'light'` or `'dark'`) |
+| `setMode` | `(mode: ThemeMode) => void` | Set the theme mode |
+| `toggle` | `() => void` | Toggle between light and dark |
+| `colors` | `ThemeColors` | Current theme color values |
+
+<Callout type="warning">
+  `useTheme` must be used within a `ThemeProvider`. It will throw an error if called outside the provider context.
+</Callout>
+
+## useThemeOptional Hook
+
+A safe alternative that returns default values when used outside a provider:
+
+```tsx
+import { useThemeOptional } from '@anthropic-ai/claude-code-sdk/terminal'
+
+function SafeComponent() {
+  // Won't throw if outside ThemeProvider
+  const { theme, colors } = useThemeOptional()
+
+  return (
+    <div style={{ background: colors.background }}>
+      Theme: {theme}
+    </div>
+  )
+}
+```
+
+## Types
+
+### ThemeMode
+
+```typescript
+type ThemeMode = 'light' | 'dark' | 'system'
+```
+
+| Value | Description |
+|-------|-------------|
+| `'light'` | Always use light theme |
+| `'dark'` | Always use dark theme |
+| `'system'` | Follow system preference |
+
+### ResolvedTheme
+
+The actual theme being applied after resolving system preference:
+
+```typescript
+type ResolvedTheme = 'light' | 'dark'
+```
+
+### ThemeColors
+
+Complete color palette for theming components:
+
+```typescript
+interface ThemeColors {
+  // Base colors
+  background: string
+  foreground: string
+  muted: string
+  mutedForeground: string
+
+  // Component colors
+  border: string
+  input: string
+  ring: string
+
+  // Accent colors
+  primary: string
+  primaryForeground: string
+  secondary: string
+  secondaryForeground: string
+
+  // Semantic colors
+  destructive: string
+  destructiveForeground: string
+  success: string
+  successForeground: string
+  warning: string
+  warningForeground: string
+
+  // Terminal-specific colors
+  terminalBackground: string
+  terminalForeground: string
+  terminalCursor: string
+  terminalSelection: string
+}
+```
+
+### ThemeContextValue
+
+```typescript
+interface ThemeContextValue {
+  mode: ThemeMode
+  theme: ResolvedTheme
+  setMode: (mode: ThemeMode) => void
+  toggle: () => void
+  colors: ThemeColors
+}
+```
+
+### ThemeProviderProps
+
+```typescript
+interface ThemeProviderProps {
+  children: ReactNode
+  defaultMode?: ThemeMode
+  storageKey?: string
+  forcedTheme?: ResolvedTheme
+}
+```
+
+## Custom Theme Creation
+
+### Using Theme Colors
+
+Access the current color palette to style custom components:
+
+```tsx
+import { useTheme } from '@anthropic-ai/claude-code-sdk/terminal'
+
+function CustomPanel() {
+  const { colors } = useTheme()
+
+  return (
+    <div
+      style={{
+        background: colors.background,
+        color: colors.foreground,
+        border: `1px solid ${colors.border}`,
+        padding: '1rem',
+      }}
+    >
+      <h2 style={{ color: colors.primary }}>Custom Panel</h2>
+      <p style={{ color: colors.mutedForeground }}>
+        Styled with theme colors
+      </p>
+    </div>
+  )
+}
+```
+
+### Conditional Styling by Theme
+
+Apply different styles based on the resolved theme:
+
+```tsx
+import { useTheme } from '@anthropic-ai/claude-code-sdk/terminal'
+
+function ConditionalStyles() {
+  const { theme, colors } = useTheme()
+
+  return (
+    <div
+      style={{
+        background: colors.background,
+        boxShadow: theme === 'dark'
+          ? '0 4px 12px rgba(0, 0, 0, 0.5)'
+          : '0 4px 12px rgba(0, 0, 0, 0.1)',
+      }}
+    >
+      Content with theme-aware shadow
+    </div>
+  )
+}
+```
+
+### Theme-Aware CSS Classes
+
+The provider adds a class to the document root element:
+
+```css
+/* styles.css */
+.dark .custom-component {
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.light .custom-component {
+  background: #ffffff;
+  color: #0f172a;
+}
+```
+
+### Building a Theme Selector
+
+```tsx
+import { useTheme, type ThemeMode } from '@anthropic-ai/claude-code-sdk/terminal'
+
+function ThemeSelector() {
+  const { mode, setMode } = useTheme()
+
+  const options: { value: ThemeMode; label: string }[] = [
+    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark' },
+    { value: 'system', label: 'System' },
+  ]
+
+  return (
+    <select
+      value={mode}
+      onChange={(e) => setMode(e.target.value as ThemeMode)}
+    >
+      {options.map(({ value, label }) => (
+        <option key={value} value={value}>
+          {label}
+        </option>
+      ))}
+    </select>
+  )
+}
+```
+
+## Persistence
+
+Theme preference is automatically persisted to `localStorage` using the configured `storageKey`. On subsequent visits, the stored preference is restored.
+
+```tsx
+// Use a custom storage key for your app
+<ThemeProvider storageKey="my-app-theme-preference">
+  {/* ... */}
+</ThemeProvider>
+```
+
+## System Preference Detection
+
+When `mode` is set to `'system'`, the provider automatically:
+
+1. Detects the user's system color scheme preference
+2. Listens for changes to the system preference
+3. Updates the theme in real-time when the system preference changes
+
+```tsx
+function SystemAwareApp() {
+  return (
+    <ThemeProvider defaultMode="system">
+      {/* Theme automatically follows OS dark mode setting */}
+      <App />
+    </ThemeProvider>
+  )
+}
+```
+
+## Forced Theme
+
+Override the theme for specific sections or during development:
+
+```tsx
+// Force dark theme regardless of user preference
+<ThemeProvider forcedTheme="dark">
+  <AlwaysDarkSection />
+</ThemeProvider>
+```
+
+## Next Steps
+
+- [Terminal Component](/terminal/components/terminal) - Terminal with theme support
+- [Layout Component](/terminal/components/layout) - Themed layout containers
+- [Session Panel](/terminal/components/session-panel) - Session management UI
+- [Embedding Guide](/terminal/embedding) - Embed terminals in external applications

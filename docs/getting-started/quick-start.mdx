@@ -1,0 +1,174 @@
+---
+title: "Quick Start"
+description: "Build your first Claude Code-powered application in 5 minutes"
+---
+
+This tutorial walks you through creating your first Claude Code session and handling real-time streaming events.
+
+## Prerequisites
+
+Before starting, ensure you have:
+
+- Node.js 18+ installed
+- A Cloudflare Workers account (for deployment)
+- An Anthropic API key
+- The `@dotdo/claude` package installed:
+
+```bash
+npm install @dotdo/claude
+```
+
+## Step 1: Create the Claude Client
+
+Import and create a client instance with your RPC endpoint URL:
+
+```typescript title="client.ts"
+import { createClaudeClient } from '@dotdo/claude'
+
+const claude = createClaudeClient({
+  url: 'wss://your-worker.workers.dev/rpc',
+})
+```
+
+## Step 2: Add Event Callbacks
+
+Configure callbacks to receive real-time updates as Claude works:
+
+```typescript title="client-with-callbacks.ts"
+const claude = createClaudeClient({
+  url: 'wss://your-worker.workers.dev/rpc',
+  callbacks: {
+    onMessage: (message) => {
+      // Handle streaming messages from Claude (text chunks, tool calls, etc.)
+      console.log('Claude:', message.type, message.content)
+    },
+    onTodoUpdate: (update) => {
+      // Track task progress as Claude works through complex requests
+      console.log('Tasks:', update.todos.map(t =>
+        `[${t.status}] ${t.content}`
+      ).join('\n'))
+    },
+    onPlanUpdate: (update) => {
+      // Display execution plan showing Claude's intended approach
+      console.log('Plan:', update.plan)
+    },
+    onError: (error) => {
+      // Handle errors with code for programmatic handling
+      console.error('Error:', error.code, error.message)
+    },
+    onComplete: (result) => {
+      // Called when the entire response is finished
+      console.log('Completed:', result)
+    },
+  },
+})
+```
+
+## Step 3: Create a Session
+
+Sessions represent a Claude Code workspace. Create one with a working directory:
+
+```typescript title="create-session.ts"
+const session = await claude.createSession({
+  cwd: '/workspace/my-project',           // Working directory for file operations
+  model: 'claude-sonnet-4-20250514',       // Model to use for this session
+  permissionMode: 'acceptEdits',           // Auto-accept file edits without prompts
+})
+
+console.log('Session created:', session.id)
+```
+
+## Step 4: Send a Message
+
+Send your first prompt to Claude:
+
+```typescript title="send-message.ts"
+// Send a prompt - responses stream through your callbacks
+await claude.sendMessage(session.id, 'Create a simple Express server with a health check endpoint')
+```
+
+Claude will stream responses through your callbacks as it works.
+
+## Complete Example
+
+Here is the full working example:
+
+```typescript title="main.ts"
+import { createClaudeClient } from '@dotdo/claude'
+
+async function main() {
+  // Create client with event callbacks for real-time updates
+  const claude = createClaudeClient({
+    url: 'wss://your-worker.workers.dev/rpc',
+    callbacks: {
+      onMessage: (message) => {
+        if (message.type === 'assistant') {
+          process.stdout.write(message.content?.text || '')
+        }
+      },
+      onTodoUpdate: (update) => {
+        console.log('\n--- Task Update ---')
+        for (const todo of update.todos) {
+          const icon = todo.status === 'completed' ? '[x]'
+                     : todo.status === 'in_progress' ? '[~]'
+                     : '[ ]'
+          console.log(`${icon} ${todo.content}`)
+        }
+        console.log('-------------------\n')
+      },
+      onError: (error) => {
+        console.error('Error:', error.message)
+      },
+      onComplete: () => {
+        console.log('\n=== Task Complete ===')
+      },
+    },
+  })
+
+  // Create session
+  const session = await claude.createSession({
+    cwd: '/workspace/my-project',
+    permissionMode: 'acceptEdits',
+  })
+
+  console.log('Session ID:', session.id)
+
+  // Send message
+  await claude.sendMessage(
+    session.id,
+    'Create a TypeScript file that exports a function to calculate fibonacci numbers'
+  )
+}
+
+main().catch(console.error)
+```
+
+## Expected Output
+
+When you run this example, you will see output similar to:
+
+```text title="expected-output"
+Session ID: sess_abc123xyz
+
+--- Task Update ---
+[~] Creating fibonacci.ts file
+-------------------
+
+I'll create a TypeScript file with a fibonacci function for you.
+
+--- Task Update ---
+[x] Creating fibonacci.ts file
+-------------------
+
+=== Task Complete ===
+```
+
+The created file will contain the requested fibonacci implementation.
+
+## Next Steps
+
+Now that you have a working session, explore these topics:
+
+- [Core Concepts](/getting-started/concepts) - Understand sessions, RPC, and streaming
+- [Session Management](/guides/session-management) - Resume, fork, and manage sessions
+- [Deploy to Cloudflare](/guides/cloudflare-deployment) - Run your own Claude Code server

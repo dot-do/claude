@@ -1,0 +1,331 @@
+---
+title: Chat
+description: Conversational interface component for displaying message threads with markdown rendering and streaming support.
+---
+
+The Chat component provides a rich conversational interface for displaying message threads between users and Claude. It supports markdown rendering, streaming message display, and customizable styling.
+
+## Installation
+
+The Chat component is included in the `@anthropic/terminal` package:
+
+```bash
+npm install @anthropic/terminal
+```
+
+## Basic Usage
+
+```tsx title="App.tsx"
+import { useState } from 'react';
+import { Chat, ChatMessage } from '@anthropic/terminal';
+
+function App() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSend = async (content: string) => {
+    setIsLoading(true);
+
+    // Add user message
+    setMessages(prev => [...prev, {
+      role: 'user',
+      content,
+      timestamp: new Date(),
+    }]);
+
+    // Send to API and handle response
+    const response = await sendMessage(content);
+
+    setMessages(prev => [...prev, {
+      role: 'assistant',
+      content: response,
+      timestamp: new Date(),
+    }]);
+
+    setIsLoading(false);
+  };
+
+  return (
+    <Chat
+      messages={messages}
+      onSend={handleSend}
+      isLoading={isLoading}
+    />
+  );
+}
+```
+
+## Props
+
+### `ChatProps`
+
+| Prop | Type | Required | Description |
+|------|------|----------|-------------|
+| `messages` | `ChatMessage[]` | Yes | Array of messages to display in the chat |
+| `onSend` | `(content: string) => void` | Yes | Callback fired when user submits a message |
+| `isLoading` | `boolean` | No | Shows loading indicator when true |
+| `className` | `string` | No | Additional CSS class names for styling |
+
+## Types
+
+### `ChatMessage`
+
+```typescript title="chat-message.ts"
+interface ChatMessage {
+  /** The role of the message sender */
+  role: 'user' | 'assistant' | 'system';
+
+  /** The message content, supports markdown */
+  content: string;
+
+  /** When the message was sent */
+  timestamp: Date;
+}
+```
+
+### `ChatProps`
+
+```typescript title="chat-props.ts"
+interface ChatProps {
+  /** Array of messages to display */
+  messages: ChatMessage[];
+
+  /** Callback when user sends a message */
+  onSend: (content: string) => void;
+
+  /** Shows loading state during API calls */
+  isLoading?: boolean;
+
+  /** Additional CSS classes */
+  className?: string;
+}
+```
+
+## Features
+
+### Markdown Rendering
+
+The Chat component automatically renders markdown content in messages, including:
+
+- **Text formatting**: Bold, italic, strikethrough
+- **Code blocks**: Syntax-highlighted with language detection
+- **Inline code**: Monospace formatting
+- **Lists**: Ordered and unordered
+- **Links**: Clickable URLs
+- **Tables**: Formatted data tables
+
+```tsx title="markdown-example.tsx"
+const messages: ChatMessage[] = [
+  {
+    role: 'assistant',
+    content: `Here's a code example:
+
+\`\`\`typescript
+function greet(name: string): string {
+  return \`Hello, \${name}!\`;
+}
+\`\`\`
+
+You can call it with \`greet('World')\`.`,
+    timestamp: new Date(),
+  },
+];
+
+<Chat messages={messages} onSend={handleSend} />
+```
+
+### Streaming Message Display
+
+For real-time streaming responses, update the message content progressively:
+
+```tsx title="streaming-example.tsx"
+import { Chat, ChatMessage } from '@anthropic/terminal';
+
+function StreamingChat() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSend = async (content: string) => {
+    // Add user message
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+
+    setIsLoading(true);
+
+    // Create placeholder for assistant response
+    const assistantMessage: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, assistantMessage]);
+
+    // Stream the response
+    const stream = await createStream(content);
+
+    for await (const chunk of stream) {
+      setMessages(prev => {
+        const updated = [...prev];
+        const lastMessage = updated[updated.length - 1];
+        updated[updated.length - 1] = {
+          ...lastMessage,
+          content: lastMessage.content + chunk,
+        };
+        return updated;
+      });
+    }
+
+    setIsLoading(false);
+  };
+
+  return (
+    <Chat
+      messages={messages}
+      onSend={handleSend}
+      isLoading={isLoading}
+    />
+  );
+}
+```
+
+### Custom Styling
+
+Apply custom styles using the `className` prop:
+
+```tsx title="styled-chat.tsx"
+<Chat
+  messages={messages}
+  onSend={handleSend}
+  className="my-custom-chat dark-theme"
+/>
+```
+
+```css title="styles.css"
+.my-custom-chat {
+  --chat-bg: #1a1a2e;
+  --chat-user-bg: #16213e;
+  --chat-assistant-bg: #0f3460;
+  --chat-text: #e0e0e0;
+}
+
+.my-custom-chat.dark-theme {
+  background: var(--chat-bg);
+  color: var(--chat-text);
+}
+```
+
+## Advanced Usage
+
+### With System Messages
+
+Include system messages to provide context:
+
+```tsx title="system-message.tsx"
+const messages: ChatMessage[] = [
+  {
+    role: 'system',
+    content: 'You are a helpful coding assistant.',
+    timestamp: new Date(),
+  },
+  {
+    role: 'user',
+    content: 'How do I sort an array in JavaScript?',
+    timestamp: new Date(),
+  },
+  {
+    role: 'assistant',
+    content: 'You can use the `sort()` method...',
+    timestamp: new Date(),
+  },
+];
+```
+
+### Error Handling
+
+Handle errors gracefully during message sending:
+
+```tsx title="error-handling.tsx"
+const handleSend = async (content: string) => {
+  try {
+    setIsLoading(true);
+    await sendMessage(content);
+  } catch (error) {
+    setMessages(prev => [...prev, {
+      role: 'system',
+      content: 'Failed to send message. Please try again.',
+      timestamp: new Date(),
+    }]);
+  } finally {
+    setIsLoading(false);
+  }
+};
+```
+
+### Integration with Claude SDK
+
+Connect the Chat component to the Claude SDK:
+
+```tsx title="claude-integration.tsx"
+import { Chat, ChatMessage } from '@anthropic/terminal';
+import { ClaudeClient } from '@anthropic/sdk';
+
+function ClaudeChat() {
+  const client = new ClaudeClient({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  });
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSend = async (content: string) => {
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setIsLoading(true);
+
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content }],
+    });
+
+    const assistantMessage: ChatMessage = {
+      role: 'assistant',
+      content: response.content[0].text,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, assistantMessage]);
+    setIsLoading(false);
+  };
+
+  return (
+    <Chat
+      messages={messages}
+      onSend={handleSend}
+      isLoading={isLoading}
+    />
+  );
+}
+```
+
+## Accessibility
+
+The Chat component includes built-in accessibility features:
+
+- Keyboard navigation for message input
+- ARIA labels for screen readers
+- Focus management after sending messages
+- High contrast support for message roles
+
+## Next Steps
+
+- [Terminal Component](/terminal/components/terminal) - Full terminal emulator
+- [Layout Component](/terminal/components/layout) - Arrange chat alongside other panels
+- [Session Panel](/terminal/components/session-panel) - Manage multiple conversations

@@ -1,0 +1,10 @@
+{
+  "title": "Guides",
+  "pages": [
+    "index",
+    "cloudflare-deployment",
+    "authentication",
+    "session-management",
+    "streaming"
+  ]
+}

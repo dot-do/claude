@@ -1,0 +1,246 @@
+---
+title: FileTree
+description: Hierarchical file browser component with directory expansion, file icons by extension, and selection support.
+---
+
+A directory browser component with lazy loading and file selection. Tool-agnostic design works with any file listing API.
+
+## Installation
+
+```tsx
+import { FileTree } from '@anthropic/terminal'
+```
+
+## Basic Usage
+
+```tsx
+import { FileTree, FileNode } from '@anthropic/terminal'
+
+const files: FileNode[] = [
+  {
+    name: 'src',
+    path: '/src',
+    type: 'directory',
+    children: [
+      { name: 'index.ts', path: '/src/index.ts', type: 'file', size: 1024 },
+      { name: 'utils.ts', path: '/src/utils.ts', type: 'file', size: 512 },
+    ],
+  },
+  { name: 'package.json', path: '/package.json', type: 'file', size: 256 },
+]
+
+function FileBrowser() {
+  return (
+    <FileTree
+      files={files}
+      onSelect={(file) => console.log('Selected:', file.path)}
+    />
+  )
+}
+```
+
+## FileTreeProps
+
+| Prop | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `files` | `FileNode[]` | Yes | - | Root files and directories to display |
+| `onSelect` | `(file: FileNode) => void` | No | - | Called when a file is selected |
+| `onExpand` | `(dir: FileNode) => Promise<FileNode[]> \| FileNode[]` | No | - | Called when a directory is expanded (for lazy loading) |
+| `selectedPath` | `string` | No | - | Currently selected file path |
+| `showSize` | `boolean` | No | `false` | Show file sizes |
+| `showDate` | `boolean` | No | `false` | Show modified dates |
+| `className` | `string` | No | `''` | Additional CSS class |
+
+## FileNode Type
+
+```typescript
+interface FileNode {
+  /** Display name of the file or directory */
+  name: string
+  /** Full path to the file or directory */
+  path: string
+  /** Node type: 'file' or 'directory' */
+  type: 'file' | 'directory'
+  /** File size in bytes (optional) */
+  size?: number
+  /** Last modified timestamp (optional) */
+  modifiedAt?: string
+  /** Child nodes for directories (optional, used for pre-loaded trees) */
+  children?: FileNode[]
+}
+```
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `name` | `string` | Yes | Display name of the file or directory |
+| `path` | `string` | Yes | Full path to the file or directory |
+| `type` | `'file' \| 'directory'` | Yes | Node type |
+| `size` | `number` | No | File size in bytes |
+| `modifiedAt` | `string` | No | Last modified timestamp |
+| `children` | `FileNode[]` | No | Child nodes for directories |
+
+## Directory Expansion
+
+Directories can be expanded and collapsed by clicking on them. The component supports two modes:
+
+### Pre-loaded Children
+
+If `children` is provided on a directory node, those children are displayed immediately when expanded:
+
+```tsx
+const files: FileNode[] = [
+  {
+    name: 'components',
+    path: '/src/components',
+    type: 'directory',
+    children: [
+      { name: 'Button.tsx', path: '/src/components/Button.tsx', type: 'file' },
+      { name: 'Input.tsx', path: '/src/components/Input.tsx', type: 'file' },
+    ],
+  },
+]
+
+<FileTree files={files} />
+```
+
+### Lazy Loading
+
+For large file systems, use `onExpand` to load children on-demand:
+
+```tsx
+async function loadChildren(dir: FileNode): Promise<FileNode[]> {
+  const response = await fetch(`/api/files?path=${encodeURIComponent(dir.path)}`)
+  return response.json()
+}
+
+<FileTree
+  files={rootFiles}
+  onExpand={loadChildren}
+/>
+```
+
+The component displays a loading spinner while waiting for `onExpand` to resolve.
+
+## File Icons by Extension
+
+FileTree automatically displays colored icons based on file extension:
+
+| Extension | Color |
+|-----------|-------|
+| `.ts`, `.tsx` | Blue |
+| `.js`, `.jsx` | Yellow |
+| `.json` | Green |
+| `.md` | Slate |
+| `.css` | Pink |
+| `.html` | Orange |
+| `.py` | Blue |
+| `.rs` | Orange |
+| `.go` | Cyan |
+| Other | Slate (default) |
+
+Directories display a folder icon in amber.
+
+## Selection Handling
+
+Track and highlight the currently selected file:
+
+```tsx
+import { useState } from 'react'
+import { FileTree, FileNode } from '@anthropic/terminal'
+
+function FileBrowser() {
+  const [selectedPath, setSelectedPath] = useState<string>()
+
+  const handleSelect = (file: FileNode) => {
+    setSelectedPath(file.path)
+    // Load file content, update editor, etc.
+  }
+
+  return (
+    <FileTree
+      files={files}
+      selectedPath={selectedPath}
+      onSelect={handleSelect}
+    />
+  )
+}
+```
+
+## Displaying File Sizes
+
+Enable `showSize` to display formatted file sizes:
+
+```tsx
+<FileTree
+  files={files}
+  showSize
+  onSelect={handleSelect}
+/>
+```
+
+Sizes are formatted as:
+- Bytes: `256B`
+- Kilobytes: `1.5K`
+- Megabytes: `2.3M`
+
+## Complete Example
+
+```tsx
+import { useState, useCallback } from 'react'
+import { FileTree, FileNode } from '@anthropic/terminal'
+
+interface FileViewerProps {
+  initialFiles: FileNode[]
+  onFileOpen: (path: string) => void
+}
+
+export function FileViewer({ initialFiles, onFileOpen }: FileViewerProps) {
+  const [selectedPath, setSelectedPath] = useState<string>()
+
+  const handleSelect = useCallback((file: FileNode) => {
+    setSelectedPath(file.path)
+    onFileOpen(file.path)
+  }, [onFileOpen])
+
+  const handleExpand = useCallback(async (dir: FileNode): Promise<FileNode[]> => {
+    const response = await fetch(`/api/files?path=${encodeURIComponent(dir.path)}`)
+    if (!response.ok) {
+      throw new Error('Failed to load directory')
+    }
+    return response.json()
+  }, [])
+
+  return (
+    <div className="h-full border rounded-lg bg-slate-50 dark:bg-slate-900">
+      <FileTree
+        files={initialFiles}
+        selectedPath={selectedPath}
+        onSelect={handleSelect}
+        onExpand={handleExpand}
+        showSize
+        className="h-full"
+      />
+    </div>
+  )
+}
+```
+
+## Accessibility
+
+The FileTree component includes accessibility features:
+
+- `role="tree"` on the container
+- `aria-label="File tree"` for screen readers
+- Keyboard-accessible buttons for all nodes
+- Visual focus indicators
+
+## Styling
+
+The component uses Tailwind CSS classes and supports dark mode automatically. Customize appearance with the `className` prop:
+
+```tsx
+<FileTree
+  files={files}
+  className="bg-white dark:bg-slate-800 rounded-lg shadow-sm"
+/>
+```

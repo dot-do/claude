@@ -1,0 +1,227 @@
+---
+title: Layout
+description: A resizable panel layout component for building terminal applications with configurable sidebar, main content, and bottom panels.
+---
+
+The Layout component provides a flexible, resizable panel system for organizing terminal interfaces. It supports a sidebar, main content area, header, and bottom panel with draggable resize handles.
+
+## Installation
+
+The Layout component is included in the `@anthropic/terminal` package:
+
+```bash
+npm install @anthropic/terminal
+```
+
+## Basic Usage
+
+```tsx title="App.tsx"
+import { Layout } from '@anthropic/terminal'
+
+function App() {
+  return (
+    <Layout
+      sidebar={<FileTree />}
+      main={<Terminal />}
+      bottom={<LogPanel />}
+    />
+  )
+}
+```
+
+## Props
+
+The `LayoutProps` interface defines all available configuration options:
+
+```typescript
+interface LayoutProps {
+  sidebar?: ReactNode
+  main?: ReactNode
+  bottom?: ReactNode
+  header?: ReactNode
+  sidebarWidth?: number
+  bottomHeight?: number
+  minSidebarWidth?: number
+  maxSidebarWidth?: number
+  minBottomHeight?: number
+  maxBottomHeight?: number
+  showSidebar?: boolean
+  showBottom?: boolean
+  className?: string
+}
+```
+
+### Props Reference
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `sidebar` | `ReactNode` | `undefined` | Content rendered in the left sidebar panel |
+| `main` | `ReactNode` | `undefined` | Primary content area in the center |
+| `bottom` | `ReactNode` | `undefined` | Content rendered in the bottom panel |
+| `header` | `ReactNode` | `undefined` | Fixed header content at the top |
+| `sidebarWidth` | `number` | `256` | Initial sidebar width in pixels |
+| `bottomHeight` | `number` | `200` | Initial bottom panel height in pixels |
+| `minSidebarWidth` | `number` | `150` | Minimum width when resizing sidebar |
+| `maxSidebarWidth` | `number` | `500` | Maximum width when resizing sidebar |
+| `minBottomHeight` | `number` | `100` | Minimum height when resizing bottom panel |
+| `maxBottomHeight` | `number` | `500` | Maximum height when resizing bottom panel |
+| `showSidebar` | `boolean` | `true` | Toggle sidebar visibility |
+| `showBottom` | `boolean` | `true` | Toggle bottom panel visibility |
+| `className` | `string` | `''` | Additional CSS classes for the container |
+
+## Resizable Panels
+
+The Layout component features draggable resize handles between panels. Users can click and drag to adjust panel sizes within the configured min/max constraints.
+
+```tsx title="CustomSizes.tsx"
+import { Layout } from '@anthropic/terminal'
+
+function CustomLayout() {
+  return (
+    <Layout
+      sidebar={<Sidebar />}
+      main={<MainContent />}
+      bottom={<OutputPanel />}
+      // Custom initial sizes
+      sidebarWidth={300}
+      bottomHeight={250}
+      // Constrain resize range
+      minSidebarWidth={200}
+      maxSidebarWidth={400}
+      minBottomHeight={150}
+      maxBottomHeight={400}
+    />
+  )
+}
+```
+
+### Resize Handle Behavior
+
+- **Sidebar handle**: Vertical divider on the right edge of the sidebar
+- **Bottom handle**: Horizontal divider above the bottom panel
+- **Visual feedback**: Handles highlight on hover and while dragging
+- **Text selection**: Disabled during resize to prevent accidental selections
+
+## Responsive Behavior
+
+The Layout component adapts to available viewport space:
+
+- **Fills container**: Uses `h-full` to fill its parent container height
+- **Overflow handling**: Each panel handles overflow independently
+- **Flex-based layout**: Panels use flexbox for responsive distribution
+- **Theme support**: Automatically applies light/dark theme styles
+
+```tsx title="FullScreen.tsx"
+// Ensure the layout fills the viewport
+function FullScreenLayout() {
+  return (
+    <div className="h-screen">
+      <Layout
+        header={<Header />}
+        sidebar={<Navigation />}
+        main={<Terminal />}
+      />
+    </div>
+  )
+}
+```
+
+## Panel Visibility
+
+Control which panels are displayed using the visibility props:
+
+```tsx title="TogglePanels.tsx"
+import { useState } from 'react'
+import { Layout } from '@anthropic/terminal'
+
+function ToggleableLayout() {
+  const [showSidebar, setShowSidebar] = useState(true)
+  const [showBottom, setShowBottom] = useState(false)
+
+  return (
+    <Layout
+      header={
+        <Toolbar
+          onToggleSidebar={() => setShowSidebar(!showSidebar)}
+          onToggleBottom={() => setShowBottom(!showBottom)}
+        />
+      }
+      sidebar={<FileTree />}
+      main={<Terminal />}
+      bottom={<LogViewer />}
+      showSidebar={showSidebar}
+      showBottom={showBottom}
+    />
+  )
+}
+```
+
+## Complete Example
+
+A full terminal application layout with all panels:
+
+```tsx title="TerminalApp.tsx"
+import { Layout, Terminal, FileTree, SessionPanel } from '@anthropic/terminal'
+
+function TerminalApp() {
+  return (
+    <div className="h-screen">
+      <Layout
+        className="font-mono"
+        header={
+          <div className="flex items-center justify-between px-4 py-2">
+            <h1 className="text-sm font-semibold">Claude Terminal</h1>
+            <SessionPanel />
+          </div>
+        }
+        sidebar={
+          <div className="h-full overflow-auto p-2">
+            <FileTree root="/workspace" />
+          </div>
+        }
+        main={
+          <Terminal
+            fontSize={14}
+            theme="dark"
+          />
+        }
+        bottom={
+          <div className="h-full overflow-auto p-2 font-mono text-xs">
+            <pre>Build output and logs...</pre>
+          </div>
+        }
+        sidebarWidth={280}
+        bottomHeight={180}
+        minSidebarWidth={200}
+        maxSidebarWidth={450}
+      />
+    </div>
+  )
+}
+```
+
+## Styling
+
+The Layout component uses Tailwind CSS classes and supports theming:
+
+```tsx title="ThemedLayout.tsx"
+<Layout
+  className="rounded-lg border border-slate-200 dark:border-slate-700"
+  sidebar={<Sidebar />}
+  main={<Content />}
+/>
+```
+
+### CSS Custom Properties
+
+The component respects the following theme transitions:
+
+- Background colors transition smoothly between light/dark modes
+- Border colors adapt to the current theme
+- The `theme-transition` class enables smooth color transitions
+
+## Next Steps
+
+- [Terminal Component](/terminal/components/terminal) - Full terminal emulator
+- [FileTree Component](/terminal/components/file-tree) - File browser for sidebar
+- [SessionPanel Component](/terminal/components/session-panel) - Session management header

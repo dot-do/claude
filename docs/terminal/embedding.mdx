@@ -1,0 +1,560 @@
+---
+title: Embedding
+description: Embed terminal interfaces in external applications using iframe and type-safe postMessage communication
+---
+
+The `@dotdo/terminal` package provides an embeddable terminal component that can be integrated into any application using iframes. Communication between the parent application and the embedded terminal occurs via the browser's `postMessage` API with a well-defined message protocol.
+
+## Installation
+
+```bash
+npm install @dotdo/terminal
+```
+
+## TerminalEmbed Component
+
+The `TerminalEmbed` component provides a React wrapper around the terminal iframe with type-safe message handling:
+
+```tsx title="EmbeddedTerminal.tsx"
+import { useRef } from 'react'
+import { TerminalEmbed, TerminalEmbedRef } from '@dotdo/terminal/embed'
+
+function App() {
+  const terminalRef = useRef<TerminalEmbedRef>(null)
+
+  const handleSendCommand = () => {
+    terminalRef.current?.sendInput('echo "Hello World"\n')
+  }
+
+  return (
+    <div style={{ width: '100%', height: '500px' }}>
+      <TerminalEmbed
+        ref={terminalRef}
+        src="https://terminal.cod.ng"
+        sessionId="session-abc123"
+        onOutput={(data) => console.log('Output:', data)}
+        onResize={(size) => console.log('Size:', size.cols, 'x', size.rows)}
+        onReady={(sessionId) => console.log('Ready:', sessionId)}
+        onError={(error, code) => console.error('Error:', error, code)}
+        onDisconnect={(reason) => console.log('Disconnected:', reason)}
+      />
+      <button onClick={handleSendCommand}>Send Command</button>
+    </div>
+  )
+}
+```
+
+## TerminalEmbedProps
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `src` | `string` | - | Base URL of the terminal app |
+| `sessionId` | `string` | - | Session ID to connect to |
+| `params` | `Record<string, string>` | `{}` | Additional URL parameters |
+| `onOutput` | `(data: string) => void` | - | Called when terminal outputs data |
+| `onResize` | `(size: { cols: number; rows: number }) => void` | - | Called when terminal resizes |
+| `onReady` | `(sessionId: string) => void` | - | Called when terminal is ready |
+| `onError` | `(error: string, code?: string) => void` | - | Called on terminal error |
+| `onDisconnect` | `(reason?: string) => void` | - | Called when terminal disconnects |
+| `width` | `string \| number` | `'100%'` | iframe width |
+| `height` | `string \| number` | `'100%'` | iframe height |
+| `className` | `string` | `''` | Additional CSS class |
+| `title` | `string` | `'Terminal'` | iframe title for accessibility |
+| `allowClipboard` | `boolean` | `true` | Allow clipboard access |
+| `sandbox` | `string` | `'allow-scripts allow-same-origin allow-forms'` | Custom iframe sandbox permissions |
+
+## TerminalEmbedRef
+
+The ref exposes imperative methods for controlling the terminal:
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `sendInput` | `(data: string) => void` | Send input data to the terminal |
+
+## postMessage API Protocol
+
+The terminal iframe communicates with the parent window using the `postMessage` API. All messages follow a typed protocol with the `terminal:` prefix.
+
+### Message Direction
+
+Messages flow bidirectionally between the parent application and the terminal iframe:
+
+```
+Parent Application  <──>  Terminal iframe
+     │                         │
+     │── terminal:input ──────>│  (parent sends input)
+     │<── terminal:output ─────│  (iframe sends output)
+     │<── terminal:resize ─────│  (iframe reports resize)
+     │<── terminal:ready ──────│  (iframe is ready)
+     │<── terminal:error ──────│  (iframe reports error)
+     │<── terminal:disconnected│  (iframe disconnected)
+```
+
+### Parent to iframe Messages
+
+#### `terminal:input`
+
+Send user input to the terminal:
+
+```typescript
+interface TerminalInputMessage {
+  type: 'terminal:input'
+  data: string
+}
+```
+
+### iframe to Parent Messages
+
+#### `terminal:output`
+
+Terminal output data:
+
+```typescript
+interface TerminalOutputMessage {
+  type: 'terminal:output'
+  data: string
+}
+```
+
+#### `terminal:resize`
+
+Terminal size changed:
+
+```typescript
+interface TerminalResizeMessage {
+  type: 'terminal:resize'
+  cols: number
+  rows: number
+}
+```
+
+#### `terminal:ready`
+
+Terminal is initialized and ready:
+
+```typescript
+interface TerminalReadyMessage {
+  type: 'terminal:ready'
+  sessionId: string
+}
+```
+
+#### `terminal:error`
+
+Terminal encountered an error:
+
+```typescript
+interface TerminalErrorMessage {
+  type: 'terminal:error'
+  error: string
+  code?: string
+}
+```
+
+#### `terminal:disconnected`
+
+Terminal connection closed:
+
+```typescript
+interface TerminalDisconnectedMessage {
+  type: 'terminal:disconnected'
+  reason?: string
+}
+```
+
+## TerminalMessage Types
+
+The package exports a union type and type guard for working with terminal messages:
+
+```typescript
+import type {
+  TerminalMessage,
+  TerminalInputMessage,
+  TerminalOutputMessage,
+  TerminalResizeMessage,
+  TerminalReadyMessage,
+  TerminalErrorMessage,
+} from '@dotdo/terminal/embed'
+
+// Union of all message types
+type TerminalMessage =
+  | TerminalInputMessage
+  | TerminalOutputMessage
+  | TerminalResizeMessage
+  | TerminalReadyMessage
+  | TerminalErrorMessage
+  | TerminalDisconnectedMessage
+```
+
+### Type Guard
+
+Use the `isTerminalMessage` type guard to validate incoming messages:
+
+```typescript
+import { isTerminalMessage } from '@dotdo/terminal/embed'
+
+window.addEventListener('message', (event) => {
+  if (isTerminalMessage(event.data)) {
+    // event.data is typed as TerminalMessage
+    console.log('Terminal message:', event.data.type)
+  }
+})
+```
+
+## Security Considerations
+
+<Callout type="warning">
+Always validate the message origin to prevent cross-site scripting (XSS) attacks. Never trust messages from unknown origins.
+</Callout>
+
+### Origin Validation
+
+The `TerminalEmbed` component automatically validates that incoming messages originate from the expected terminal URL:
+
+```typescript
+const handleMessage = (event: MessageEvent) => {
+  // Verify origin matches the terminal src
+  const expectedOrigin = new URL(src).origin
+  if (event.origin !== expectedOrigin) {
+    return // Ignore messages from unknown origins
+  }
+
+  // Process the message
+  if (isTerminalMessage(event.data)) {
+    // Safe to handle
+  }
+}
+```
+
+### Implementing Origin Validation (Vanilla JS)
+
+When not using the React component, implement origin validation manually:
+
+```typescript title="secure-message-handler.ts"
+const ALLOWED_ORIGIN = 'https://terminal.cod.ng'
+
+function setupSecureMessageHandler(onMessage: (msg: TerminalMessage) => void) {
+  window.addEventListener('message', (event) => {
+    // Strict origin check
+    if (event.origin !== ALLOWED_ORIGIN) {
+      console.warn('Rejected message from unauthorized origin:', event.origin)
+      return
+    }
+
+    // Validate message structure
+    if (!isTerminalMessage(event.data)) {
+      console.warn('Rejected malformed message:', event.data)
+      return
+    }
+
+    onMessage(event.data)
+  })
+}
+```
+
+### Sandbox Permissions
+
+The iframe uses sandbox attributes to limit capabilities. The default permissions are:
+
+| Permission | Purpose |
+|------------|---------|
+| `allow-scripts` | Enable JavaScript execution in the terminal |
+| `allow-same-origin` | Allow access to same-origin resources |
+| `allow-forms` | Enable form submission (for authentication flows) |
+
+<Callout type="info">
+Avoid adding `allow-top-navigation` unless absolutely necessary, as it could allow the iframe to redirect the parent page.
+</Callout>
+
+### Content Security Policy
+
+For additional security, configure your Content Security Policy to restrict iframe sources:
+
+```http
+Content-Security-Policy: frame-src https://terminal.cod.ng;
+```
+
+## Code Examples
+
+### Parent Application (React)
+
+Complete example of a parent application embedding the terminal:
+
+```tsx title="ParentApp.tsx"
+import { useRef, useState, useCallback } from 'react'
+import { TerminalEmbed, TerminalEmbedRef } from '@dotdo/terminal/embed'
+
+function ParentApp() {
+  const terminalRef = useRef<TerminalEmbedRef>(null)
+  const [logs, setLogs] = useState<string[]>([])
+  const [isReady, setIsReady] = useState(false)
+
+  const addLog = useCallback((message: string) => {
+    setLogs((prev) => [...prev.slice(-99), message])
+  }, [])
+
+  const handleReady = useCallback((sessionId: string) => {
+    setIsReady(true)
+    addLog(`Terminal ready: ${sessionId}`)
+  }, [addLog])
+
+  const handleOutput = useCallback((data: string) => {
+    addLog(`Output: ${data.slice(0, 100)}...`)
+  }, [addLog])
+
+  const handleError = useCallback((error: string, code?: string) => {
+    addLog(`Error [${code}]: ${error}`)
+  }, [addLog])
+
+  const sendCommand = (cmd: string) => {
+    if (isReady) {
+      terminalRef.current?.sendInput(`${cmd}\n`)
+      addLog(`Sent: ${cmd}`)
+    }
+  }
+
+  return (
+    <div className="app">
+      <header>
+        <h1>Terminal Embed Demo</h1>
+        <div className="controls">
+          <button onClick={() => sendCommand('ls -la')} disabled={!isReady}>
+            List Files
+          </button>
+          <button onClick={() => sendCommand('pwd')} disabled={!isReady}>
+            Print Directory
+          </button>
+        </div>
+      </header>
+
+      <main className="terminal-container">
+        <TerminalEmbed
+          ref={terminalRef}
+          src="https://terminal.cod.ng"
+          sessionId="demo-session"
+          width="100%"
+          height={400}
+          onReady={handleReady}
+          onOutput={handleOutput}
+          onError={handleError}
+          onDisconnect={(reason) => addLog(`Disconnected: ${reason}`)}
+        />
+      </main>
+
+      <aside className="log-panel">
+        <h2>Event Log</h2>
+        <ul>
+          {logs.map((log, i) => (
+            <li key={i}>{log}</li>
+          ))}
+        </ul>
+      </aside>
+    </div>
+  )
+}
+```
+
+### Parent Application (Vanilla HTML/JS)
+
+For non-React applications, use the postMessage API directly:
+
+```html title="index.html"
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Terminal Embed</title>
+  <style>
+    #terminal-frame {
+      width: 100%;
+      height: 500px;
+      border: 1px solid #333;
+    }
+    #output-log {
+      height: 200px;
+      overflow-y: auto;
+      background: #1a1a1a;
+      color: #fff;
+      padding: 10px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <h1>Terminal Embed Demo</h1>
+
+  <div>
+    <button onclick="sendCommand('ls -la')">List Files</button>
+    <button onclick="sendCommand('pwd')">Print Directory</button>
+    <input type="text" id="cmd-input" placeholder="Enter command...">
+    <button onclick="sendCustomCommand()">Send</button>
+  </div>
+
+  <iframe
+    id="terminal-frame"
+    src="https://terminal.cod.ng?session=demo-session"
+    allow="clipboard-read; clipboard-write"
+    sandbox="allow-scripts allow-same-origin allow-forms"
+  ></iframe>
+
+  <h2>Output Log</h2>
+  <div id="output-log"></div>
+
+  <script>
+    const TERMINAL_ORIGIN = 'https://terminal.cod.ng'
+    const iframe = document.getElementById('terminal-frame')
+    const outputLog = document.getElementById('output-log')
+
+    // Listen for messages from the terminal
+    window.addEventListener('message', (event) => {
+      // Security: validate origin
+      if (event.origin !== TERMINAL_ORIGIN) {
+        console.warn('Ignored message from:', event.origin)
+        return
+      }
+
+      const message = event.data
+
+      // Validate message format
+      if (!message || typeof message.type !== 'string') return
+      if (!message.type.startsWith('terminal:')) return
+
+      switch (message.type) {
+        case 'terminal:ready':
+          log(`Ready: session=${message.sessionId}`)
+          break
+        case 'terminal:output':
+          log(`Output: ${message.data.slice(0, 100)}`)
+          break
+        case 'terminal:resize':
+          log(`Resize: ${message.cols}x${message.rows}`)
+          break
+        case 'terminal:error':
+          log(`Error [${message.code}]: ${message.error}`)
+          break
+        case 'terminal:disconnected':
+          log(`Disconnected: ${message.reason || 'unknown'}`)
+          break
+      }
+    })
+
+    function sendCommand(cmd) {
+      const message = {
+        type: 'terminal:input',
+        data: cmd + '\n'
+      }
+      iframe.contentWindow.postMessage(message, TERMINAL_ORIGIN)
+      log(`Sent: ${cmd}`)
+    }
+
+    function sendCustomCommand() {
+      const input = document.getElementById('cmd-input')
+      if (input.value) {
+        sendCommand(input.value)
+        input.value = ''
+      }
+    }
+
+    function log(text) {
+      const entry = document.createElement('div')
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${text}`
+      outputLog.appendChild(entry)
+      outputLog.scrollTop = outputLog.scrollHeight
+    }
+  </script>
+</body>
+</html>
+```
+
+### iframe Implementation (Terminal Side)
+
+If you're implementing the terminal iframe side, here's how to handle the protocol:
+
+```typescript title="terminal-iframe.ts"
+const ALLOWED_ORIGINS = [
+  'https://your-app.com',
+  'https://localhost:3000',
+]
+
+// Send message to parent
+function sendToParent(message: TerminalMessage) {
+  if (window.parent !== window) {
+    // Use '*' only if you don't know the parent origin
+    // Prefer specific origin when possible
+    window.parent.postMessage(message, '*')
+  }
+}
+
+// Notify parent when ready
+function notifyReady(sessionId: string) {
+  sendToParent({
+    type: 'terminal:ready',
+    sessionId,
+  })
+}
+
+// Forward terminal output to parent
+function handleTerminalOutput(data: string) {
+  sendToParent({
+    type: 'terminal:output',
+    data,
+  })
+}
+
+// Forward resize events to parent
+function handleTerminalResize(cols: number, rows: number) {
+  sendToParent({
+    type: 'terminal:resize',
+    cols,
+    rows,
+  })
+}
+
+// Listen for input from parent
+window.addEventListener('message', (event) => {
+  // Validate origin
+  if (!ALLOWED_ORIGINS.includes(event.origin)) {
+    return
+  }
+
+  const message = event.data
+  if (message?.type === 'terminal:input') {
+    // Write input to terminal
+    terminal.write(message.data)
+  }
+})
+```
+
+## Troubleshooting
+
+### Messages Not Being Received
+
+1. **Check origin validation**: Ensure the parent and iframe origins match exactly (including protocol and port)
+2. **Verify sandbox permissions**: The iframe needs `allow-scripts` to send messages
+3. **Check message format**: Messages must include the `type` property with `terminal:` prefix
+
+### Clipboard Not Working
+
+Enable clipboard permissions in both the `allow` attribute and sandbox:
+
+```tsx
+<TerminalEmbed
+  src="https://terminal.cod.ng"
+  allowClipboard={true}
+  sandbox="allow-scripts allow-same-origin allow-forms"
+/>
+```
+
+### Cross-Origin Issues
+
+If embedding from a different domain, ensure the terminal server sends appropriate CORS headers:
+
+```http
+Access-Control-Allow-Origin: https://your-app.com
+X-Frame-Options: ALLOW-FROM https://your-app.com
+```
+
+## Next Steps
+
+- [Terminal Component](/terminal/components/terminal) - Direct terminal component usage
+- [Theme Customization](/terminal/themes) - Configure terminal appearance
+- [Layout Component](/terminal/components/layout) - Build complete terminal interfaces

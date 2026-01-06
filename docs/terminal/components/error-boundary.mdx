@@ -1,0 +1,156 @@
+---
+title: ErrorBoundary
+description: React error boundary component for graceful error handling in terminal applications
+---
+
+A React error boundary that catches JavaScript errors in child components and displays a fallback UI instead of crashing the entire application.
+
+## Installation
+
+```bash
+npm install @dotdo/terminal
+```
+
+## Basic Usage
+
+```tsx title="App.tsx"
+import { ErrorBoundary, Terminal } from '@dotdo/terminal'
+
+function App() {
+  return (
+    <ErrorBoundary>
+      <Terminal wsUrl="wss://api.example.com/terminal" />
+    </ErrorBoundary>
+  )
+}
+```
+
+## Props
+
+| Prop | Type | Required | Description |
+|------|------|----------|-------------|
+| `children` | `ReactNode` | Yes | Child components to wrap |
+| `fallback` | `ReactNode` | No | Custom fallback UI to display on error |
+| `onError` | `(error: Error, errorInfo: ErrorInfo) => void` | No | Callback when an error is caught |
+
+## Custom Fallback UI
+
+```tsx title="custom-fallback.tsx"
+import { ErrorBoundary } from '@dotdo/terminal'
+
+function CustomErrorFallback() {
+  return (
+    <div className="error-container">
+      <h2>Something went wrong</h2>
+      <p>Please refresh the page or try again later.</p>
+      <button onClick={() => window.location.reload()}>
+        Refresh Page
+      </button>
+    </div>
+  )
+}
+
+function App() {
+  return (
+    <ErrorBoundary fallback={<CustomErrorFallback />}>
+      <Terminal wsUrl="wss://api.example.com/terminal" />
+    </ErrorBoundary>
+  )
+}
+```
+
+## Error Logging
+
+```tsx title="error-logging.tsx"
+import { ErrorBoundary } from '@dotdo/terminal'
+
+function App() {
+  const handleError = (error: Error, errorInfo: React.ErrorInfo) => {
+    // Log to error tracking service
+    console.error('Caught error:', error)
+    console.error('Component stack:', errorInfo.componentStack)
+
+    // Send to analytics
+    analytics.track('error', {
+      message: error.message,
+      stack: error.stack,
+      componentStack: errorInfo.componentStack,
+    })
+  }
+
+  return (
+    <ErrorBoundary onError={handleError}>
+      <Terminal wsUrl="wss://api.example.com/terminal" />
+    </ErrorBoundary>
+  )
+}
+```
+
+## Nested Error Boundaries
+
+Use multiple error boundaries to isolate failures:
+
+```tsx title="nested-boundaries.tsx"
+import { ErrorBoundary, Terminal, FileTree, Layout } from '@dotdo/terminal'
+
+function App() {
+  return (
+    <ErrorBoundary fallback={<div>App crashed</div>}>
+      <Layout
+        sidebar={
+          <ErrorBoundary fallback={<div>FileTree error</div>}>
+            <FileTree files={files} />
+          </ErrorBoundary>
+        }
+        main={
+          <ErrorBoundary fallback={<div>Terminal error</div>}>
+            <Terminal wsUrl={wsUrl} />
+          </ErrorBoundary>
+        }
+      />
+    </ErrorBoundary>
+  )
+}
+```
+
+## Recovery Pattern
+
+Implement a recovery mechanism with state reset:
+
+```tsx title="recovery-pattern.tsx"
+import { useState, useCallback } from 'react'
+import { ErrorBoundary, Terminal } from '@dotdo/terminal'
+
+function RecoverableTerminal() {
+  const [key, setKey] = useState(0)
+
+  const handleError = useCallback((error: Error) => {
+    console.error('Terminal error:', error)
+  }, [])
+
+  const handleRetry = useCallback(() => {
+    setKey(k => k + 1) // Force remount
+  }, [])
+
+  return (
+    <ErrorBoundary
+      key={key}
+      onError={handleError}
+      fallback={
+        <div>
+          <p>Terminal encountered an error</p>
+          <button onClick={handleRetry}>Retry</button>
+        </div>
+      }
+    >
+      <Terminal wsUrl="wss://api.example.com/terminal" />
+    </ErrorBoundary>
+  )
+}
+```
+
+## Next Steps
+
+- [Terminal Component](/terminal/components/terminal) - Main terminal component
+- [Layout Component](/terminal/components/layout) - Layout with error isolation
+- [Theme System](/terminal/themes) - Styling error states

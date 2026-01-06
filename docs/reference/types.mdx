@@ -1,0 +1,1040 @@
+---
+title: Type Reference
+description: Complete type definitions for @dotdo/claude SDK and @dotdo/terminal packages, including messages, sessions, options, events, and React components.
+---
+
+This reference documents all exported types from the `@dotdo/claude` SDK and `@dotdo/terminal` packages.
+
+## Messages
+
+Types for Claude Code CLI streaming output and content blocks.
+
+### Content Blocks
+
+```typescript
+interface TextBlock {
+  type: 'text'
+  text: string
+}
+
+interface ToolUseBlock {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: unknown
+}
+
+interface ToolResultBlock {
+  type: 'tool_result'
+  tool_use_id: string
+  content: unknown
+  is_error?: boolean
+}
+
+interface ImageBlock {
+  type: 'image'
+  source: {
+    type: 'base64'
+    media_type: string
+    data: string
+  }
+}
+
+type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ImageBlock
+```
+
+### SDK Message Types
+
+```typescript
+/** Assistant message with text or tool use */
+interface SDKAssistantMessage {
+  type: 'assistant'
+  uuid: string
+  session_id: string
+  message: {
+    role: 'assistant'
+    content: Array<TextBlock | ToolUseBlock>
+  }
+  parent_tool_use_id: string | null
+}
+
+/** User message (tool results or user input) */
+interface SDKUserMessage {
+  type: 'user'
+  uuid?: string
+  session_id: string
+  message: {
+    role: 'user'
+    content: string | Array<TextBlock | ToolResultBlock | ImageBlock>
+  }
+  parent_tool_use_id: string | null
+}
+
+/** System init message - sent at start of session */
+interface SDKSystemInitMessage {
+  type: 'system'
+  subtype: 'init'
+  uuid: string
+  session_id: string
+  apiKeySource?: string
+  cwd: string
+  tools: string[]
+  mcp_servers?: Array<{ name: string; status: string }>
+  model: string
+  permissionMode: string
+  slash_commands?: string[]
+  output_style?: string
+}
+
+/** System compact boundary message */
+interface SDKSystemCompactMessage {
+  type: 'system'
+  subtype: 'compact_boundary'
+  uuid: string
+  session_id: string
+  compact_metadata: {
+    trigger: 'manual' | 'auto'
+    pre_tokens: number
+  }
+}
+
+type SDKSystemMessage = SDKSystemInitMessage | SDKSystemCompactMessage
+```
+
+### Result Message
+
+```typescript
+type ResultSubtype =
+  | 'success'
+  | 'error_max_turns'
+  | 'error_during_execution'
+  | 'error_max_budget_usd'
+  | 'error_max_structured_output_retries'
+
+interface SDKResultMessage {
+  type: 'result'
+  subtype: ResultSubtype
+  uuid: string
+  session_id: string
+  duration_ms: number
+  duration_api_ms: number
+  is_error: boolean
+  num_turns: number
+  total_cost_usd: number
+  usage: {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  }
+  // Success-specific fields
+  result?: string
+  structured_output?: unknown
+  // Error-specific fields
+  errors?: string[]
+  permission_denials?: Array<{
+    tool_name: string
+    tool_use_id: string
+    tool_input: unknown
+  }>
+  modelUsage?: Record<string, ModelUsage>
+}
+```
+
+### Partial Message
+
+```typescript
+/** Streaming message (when --include-partial-messages is used) */
+interface SDKPartialMessage {
+  type: 'stream_event'
+  event: unknown
+  parent_tool_use_id: string | null
+  uuid: string
+  session_id: string
+}
+```
+
+### Message Union
+
+```typescript
+type SDKMessage =
+  | SDKAssistantMessage
+  | SDKUserMessage
+  | SDKSystemMessage
+  | SDKResultMessage
+  | SDKPartialMessage
+
+/** Alias for backward compatibility */
+type StreamMessage = SDKMessage
+```
+
+### Model Types
+
+```typescript
+interface ModelUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens: number
+  cacheCreationInputTokens: number
+  webSearchRequests: number
+  costUSD: number
+  contextWindow: number
+}
+
+interface ModelInfo {
+  value: string
+  displayName: string
+  description: string
+}
+
+interface McpServerStatus {
+  name: string
+  status: 'connected' | 'failed' | 'needs-auth' | 'pending'
+  serverInfo?: {
+    name: string
+    version: string
+  }
+}
+```
+
+## Sessions
+
+Types for Claude session management and state.
+
+### Session Status
+
+```typescript
+type SessionStatus = 'active' | 'completed' | 'error' | 'interrupted'
+```
+
+### Claude Session
+
+```typescript
+interface ClaudeSession {
+  id: string
+  status: SessionStatus
+  createdAt: string
+  lastActivityAt: string
+
+  // Configuration
+  cwd: string
+  model?: string
+  systemPrompt?: SystemPromptConfig
+  tools?: ToolsConfig
+  permissionMode: PermissionMode
+  maxTurns?: number
+
+  // MCP servers
+  mcpServers?: Array<{
+    name: string
+    config: McpServerConfig
+    status?: 'connected' | 'failed' | 'needs-auth' | 'pending'
+  }>
+
+  // Runtime state
+  turnCount: number
+  totalCostUsd: number
+  usage: {
+    inputTokens: number
+    outputTokens: number
+  }
+
+  // CLI session ID (for --resume)
+  cliSessionId?: string
+
+  // Environment
+  env?: Record<string, string>
+}
+```
+
+### Session Info
+
+```typescript
+interface SessionInfo {
+  id: string
+  status: string
+  createdAt: string
+  lastActivityAt: string
+  turnCount: number
+  totalCostUsd: number
+}
+```
+
+### Query Result
+
+```typescript
+interface QueryResult {
+  sessionId: string
+  result: string
+  usage: {
+    inputTokens: number
+    outputTokens: number
+  }
+  costUsd: number
+  durationMs: number
+}
+```
+
+## Options
+
+Configuration types for Claude Code sessions and clients.
+
+### Permission Mode
+
+```typescript
+type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
+```
+
+### MCP Server Configuration
+
+```typescript
+interface McpServerStdioConfig {
+  type?: 'stdio'
+  command: string
+  args?: string[]
+  env?: Record<string, string>
+}
+
+interface McpServerSseConfig {
+  type: 'sse'
+  url: string
+  headers?: Record<string, string>
+}
+
+interface McpServerHttpConfig {
+  type: 'http'
+  url: string
+  headers?: Record<string, string>
+}
+
+type McpServerConfig = McpServerStdioConfig | McpServerSseConfig | McpServerHttpConfig
+```
+
+### System Prompt Configuration
+
+```typescript
+interface SystemPromptPreset {
+  type: 'preset'
+  preset: 'claude_code'
+  append?: string
+}
+
+type SystemPromptConfig = string | SystemPromptPreset
+```
+
+### Tools Configuration
+
+```typescript
+interface ToolsPreset {
+  type: 'preset'
+  preset: 'claude_code'
+}
+
+type ToolsConfig = string[] | ToolsPreset
+```
+
+### Claude Code Options
+
+```typescript
+interface ClaudeCodeOptions {
+  // API configuration
+  apiKey?: string
+  model?: string
+  fallbackModel?: string
+
+  // Session options
+  cwd?: string
+  env?: Record<string, string>
+
+  // Behavior configuration
+  systemPrompt?: SystemPromptConfig
+  tools?: ToolsConfig
+  allowedTools?: string[]
+  disallowedTools?: string[]
+
+  // Permissions
+  permissionMode?: PermissionMode
+  allowDangerouslySkipPermissions?: boolean
+
+  // Limits
+  maxTurns?: number
+  maxBudgetUsd?: number
+  maxThinkingTokens?: number
+
+  // MCP servers
+  mcpServers?: Record<string, McpServerConfig>
+
+  // Sandbox configuration
+  sleepAfter?: number
+  keepAlive?: boolean
+
+  // Streaming options
+  includePartialMessages?: boolean
+
+  // Session management
+  resume?: string
+  continue?: boolean
+  forkSession?: boolean
+}
+```
+
+### Client Options
+
+```typescript
+interface ClaudeClientOptions {
+  /** RPC endpoint URL */
+  url: string
+  /** Use WebSocket (default) or HTTP batch mode */
+  transport?: 'websocket' | 'http'
+  /** Connection timeout in ms */
+  timeout?: number
+  /** Auto reconnect on disconnect (WebSocket only) */
+  autoReconnect?: boolean
+  /** Max reconnect attempts */
+  maxReconnectAttempts?: number
+  /** Callbacks for streaming events */
+  callbacks?: StreamCallbackHandlers
+}
+```
+
+### Stream Callback Handlers
+
+```typescript
+interface StreamCallbackHandlers {
+  onMessage?: (message: SDKMessage) => void
+  onTodoUpdate?: (update: TodoUpdate) => void
+  onPlanUpdate?: (update: PlanUpdate) => void
+  onToolUse?: (event: ToolUseEvent) => void
+  onError?: (error: { code: string; message: string }) => void
+  onComplete?: (result: SDKResultMessage) => void
+}
+```
+
+### Server Environment
+
+```typescript
+/** Cloudflare Workers environment bindings */
+interface ClaudeCodeEnv {
+  /** Sandbox Durable Object namespace */
+  Sandbox: DurableObjectNamespace
+  /** Anthropic API key */
+  ANTHROPIC_API_KEY?: string
+  /** Optional KV namespace for session storage */
+  SESSION_STORAGE?: KVNamespace
+  /** Optional R2 bucket for message buffer */
+  MESSAGE_BUFFER?: R2Bucket
+}
+```
+
+## Events
+
+Types for real-time event streaming.
+
+### Todo Events
+
+```typescript
+type TodoStatus = 'pending' | 'in_progress' | 'completed'
+
+interface TodoItem {
+  content: string
+  status: TodoStatus
+  activeForm: string
+}
+
+interface TodoUpdate {
+  todos: TodoItem[]
+  timestamp: string
+  messageUuid?: string
+  sessionId?: string
+}
+```
+
+### Plan Events
+
+```typescript
+interface PlanUpdate {
+  plan: string
+  planFile?: string
+  timestamp: string
+  messageUuid?: string
+  sessionId?: string
+}
+```
+
+### Tool Events
+
+```typescript
+interface ToolUseEvent {
+  id: string
+  name: string
+  input: unknown
+  timestamp: string
+  sessionId?: string
+}
+
+interface ToolResultEvent {
+  tool_use_id: string
+  content: unknown
+  is_error: boolean
+  timestamp: string
+  sessionId?: string
+}
+
+type ToolEvent = ToolUseEvent | ToolResultEvent
+```
+
+### Output Events
+
+```typescript
+type OutputType = 'text' | 'tool_use' | 'tool_result' | 'status' | 'error'
+
+interface OutputEvent {
+  type: OutputType
+  content: unknown
+  timestamp: string
+  sessionId?: string
+}
+```
+
+### Session Events
+
+```typescript
+interface SessionCreatedEvent {
+  sessionId: string
+  timestamp: string
+}
+
+interface SessionStatusEvent {
+  sessionId: string
+  status: 'active' | 'completed' | 'error' | 'interrupted'
+  timestamp: string
+}
+
+interface SessionDestroyedEvent {
+  sessionId: string
+  timestamp: string
+}
+
+type SessionEvent =
+  | SessionCreatedEvent
+  | SessionStatusEvent
+  | SessionDestroyedEvent
+```
+
+### Event Callbacks
+
+```typescript
+type TodoUpdateCallback = (update: TodoUpdate) => void
+type PlanUpdateCallback = (update: PlanUpdate) => void
+type OutputCallback = (event: OutputEvent) => void
+type ToolUseCallback = (event: ToolUseEvent) => void
+type ToolResultCallback = (event: ToolResultEvent) => void
+```
+
+## RPC Types
+
+Types for Cap'n Web RPC communication.
+
+### RPC Interfaces
+
+```typescript
+interface IClaudeCodeRpc {
+  // Session management
+  createSession(options?: ClaudeCodeOptions): Promise<ClaudeSession>
+  getSession(sessionId: string): Promise<ClaudeSession | null>
+  resumeSession(sessionId: string): Promise<ClaudeSession>
+  listSessions(): Promise<ClaudeSession[]>
+  destroySession(sessionId: string): Promise<void>
+
+  // Messaging
+  sendMessage(sessionId: string, message: string): Promise<void>
+
+  // Control
+  interrupt(sessionId: string): Promise<void>
+  setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>
+
+  // Info
+  supportedModels(): Promise<ModelInfo[]>
+  mcpServerStatus(sessionId: string): Promise<McpServerStatus[]>
+}
+
+interface IStreamCallbacks {
+  onMessage(message: SDKMessage): void
+  onTodoUpdate(update: TodoUpdate): void
+  onPlanUpdate(update: PlanUpdate): void
+  onError(error: { code: string; message: string }): void
+  onComplete(result: SDKResultMessage): void
+}
+
+interface IClaudeCodeRpcWithCallbacks extends IClaudeCodeRpc {
+  sendMessageWithCallbacks(
+    sessionId: string,
+    message: string,
+    callbacks: IStreamCallbacks
+  ): Promise<void>
+
+  queryWithCallbacks(
+    prompt: string,
+    options: Partial<ClaudeCodeOptions>,
+    callbacks: IStreamCallbacks
+  ): Promise<string>
+}
+```
+
+### RPC Session Types
+
+```typescript
+type RpcSessionState = 'connecting' | 'connected' | 'disconnected' | 'error'
+
+interface RpcSessionOptions {
+  url: string
+  reconnect?: boolean
+  reconnectDelay?: number
+  maxReconnectAttempts?: number
+}
+
+interface RpcPromise<T> extends Promise<T> {
+  pipe(method: string, ...args: any[]): RpcPromise<any>
+}
+
+type RpcStub<T> = {
+  [K in keyof T]: T[K] extends (...args: infer A) => infer R
+    ? (...args: A) => RpcPromise<Awaited<R>>
+    : never
+}
+```
+
+### Error Codes
+
+```typescript
+const ErrorCodes = {
+  SESSION_NOT_FOUND: 'SESSION_NOT_FOUND',
+  SESSION_TIMEOUT: 'SESSION_TIMEOUT',
+  SESSION_CANCELLED: 'SESSION_CANCELLED',
+  PROCESS_ERROR: 'PROCESS_ERROR',
+  PERMISSION_DENIED: 'PERMISSION_DENIED',
+  INVALID_INPUT: 'INVALID_INPUT',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const
+
+type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes]
+```
+
+## Components
+
+React component prop types from `@dotdo/terminal`.
+
+### Terminal
+
+```typescript
+interface TerminalTheme {
+  background?: string
+  foreground?: string
+  cursor?: string
+  cursorAccent?: string
+  selectionBackground?: string
+  black?: string
+  red?: string
+  green?: string
+  yellow?: string
+  blue?: string
+  magenta?: string
+  cyan?: string
+  white?: string
+}
+
+interface TerminalProps {
+  /** WebSocket URL for PTY connection */
+  wsUrl?: string
+  /** Called when terminal sends data (user input) */
+  onData?: (data: string) => void
+  /** Called when terminal resizes */
+  onResize?: (size: { cols: number; rows: number }) => void
+  /** Called when WebSocket connects */
+  onConnect?: () => void
+  /** Called when WebSocket disconnects */
+  onDisconnect?: () => void
+  /** Called on WebSocket error */
+  onError?: (error: Event) => void
+  /** Incoming data to write to terminal */
+  data?: string
+  /** Terminal theme */
+  theme?: TerminalTheme
+  /** Font size in pixels */
+  fontSize?: number
+  /** Font family */
+  fontFamily?: string
+  /** Enable WebGL renderer (better performance) */
+  webgl?: boolean
+  /** Auto-focus terminal on mount */
+  autoFocus?: boolean
+  /** Aria label for accessibility */
+  ariaLabel?: string
+  /** Additional CSS class */
+  className?: string
+}
+
+interface TerminalRef {
+  write: (text: string) => void
+  clear: () => void
+  focus: () => void
+  fit: () => void
+}
+```
+
+### FileTree
+
+```typescript
+interface FileNode {
+  name: string
+  path: string
+  type: 'file' | 'directory'
+  size?: number
+  modifiedAt?: string
+  children?: FileNode[]
+}
+
+interface FileTreeProps {
+  /** Root files/directories to display */
+  files: FileNode[]
+  /** Called when a file is selected */
+  onSelect?: (file: FileNode) => void
+  /** Called when a directory is expanded (for lazy loading) */
+  onExpand?: (dir: FileNode) => Promise<FileNode[]> | FileNode[]
+  /** Currently selected file path */
+  selectedPath?: string
+  /** Show file sizes */
+  showSize?: boolean
+  /** Show modified dates */
+  showDate?: boolean
+  /** Additional CSS class */
+  className?: string
+}
+```
+
+### Layout
+
+```typescript
+interface LayoutProps {
+  /** Sidebar content (file tree, sessions) */
+  sidebar?: ReactNode
+  /** Main content (terminal, chat) */
+  main?: ReactNode
+  /** Bottom panel content (secondary terminal, logs) */
+  bottom?: ReactNode
+  /** Header content */
+  header?: ReactNode
+  /** Initial sidebar width in pixels */
+  sidebarWidth?: number
+  /** Initial bottom panel height in pixels */
+  bottomHeight?: number
+  /** Minimum sidebar width */
+  minSidebarWidth?: number
+  /** Maximum sidebar width */
+  maxSidebarWidth?: number
+  /** Minimum bottom panel height */
+  minBottomHeight?: number
+  /** Maximum bottom panel height */
+  maxBottomHeight?: number
+  /** Show/hide sidebar */
+  showSidebar?: boolean
+  /** Show/hide bottom panel */
+  showBottom?: boolean
+  /** Additional CSS class */
+  className?: string
+}
+```
+
+### DiffViewer
+
+```typescript
+type DiffViewMode = 'unified' | 'split'
+
+interface DiffViewerProps {
+  /** The diff content in git unified diff format */
+  diff: string
+  /** View mode: unified (default) or split (side-by-side) */
+  viewMode?: DiffViewMode
+  /** Show line numbers */
+  showLineNumbers?: boolean
+  /** Language for syntax highlighting */
+  language?: string
+  /** Aria label for accessibility */
+  ariaLabel?: string
+  /** Additional CSS class */
+  className?: string
+}
+```
+
+### Chat
+
+```typescript
+interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  isStreaming?: boolean
+}
+
+interface ChatProps {
+  /** Array of messages to display */
+  messages: ChatMessage[]
+  /** Called when user submits a message */
+  onSubmit?: (message: string) => void
+  /** Disable input and submit button */
+  disabled?: boolean
+  /** Placeholder text for input field */
+  placeholder?: string
+  /** Aria label for accessibility */
+  ariaLabel?: string
+  /** Additional CSS class */
+  className?: string
+}
+```
+
+### SessionPanel
+
+```typescript
+interface Session {
+  id: string
+  name: string
+  status: 'active' | 'idle' | 'disconnected'
+  createdAt?: string
+}
+
+interface SessionPanelProps {
+  /** Array of sessions to display */
+  sessions: Session[]
+  /** Currently active session ID */
+  activeSessionId?: string
+  /** Called when a session is selected */
+  onSelect?: (session: Session) => void
+  /** Called when creating a new session */
+  onCreate?: () => void
+  /** Called when deleting a session */
+  onDelete?: (session: Session) => void
+  /** Additional CSS class */
+  className?: string
+  /** Aria label for accessibility */
+  ariaLabel?: string
+}
+```
+
+### ThemeProvider
+
+```typescript
+type ThemeMode = 'light' | 'dark' | 'system'
+type ResolvedTheme = 'light' | 'dark'
+
+interface ThemeColors {
+  // Base colors
+  background: string
+  foreground: string
+  muted: string
+  mutedForeground: string
+
+  // Component colors
+  border: string
+  input: string
+  ring: string
+
+  // Accent colors
+  primary: string
+  primaryForeground: string
+  secondary: string
+  secondaryForeground: string
+
+  // Semantic colors
+  destructive: string
+  destructiveForeground: string
+  success: string
+  successForeground: string
+  warning: string
+  warningForeground: string
+
+  // Terminal-specific colors
+  terminalBackground: string
+  terminalForeground: string
+  terminalCursor: string
+  terminalSelection: string
+}
+
+interface ThemeContextValue {
+  /** Current theme mode setting */
+  mode: ThemeMode
+  /** Resolved theme (light or dark) */
+  theme: ResolvedTheme
+  /** Set theme mode */
+  setMode: (mode: ThemeMode) => void
+  /** Toggle between light and dark */
+  toggle: () => void
+  /** Theme color values */
+  colors: ThemeColors
+}
+
+interface ThemeProviderProps {
+  /** Child components */
+  children: ReactNode
+  /** Default theme mode */
+  defaultMode?: ThemeMode
+  /** Storage key for persisting theme preference */
+  storageKey?: string
+  /** Force a specific theme (overrides mode) */
+  forcedTheme?: ResolvedTheme
+}
+```
+
+### TerminalEmbed
+
+```typescript
+interface TerminalEmbedProps {
+  /** Base URL of the terminal app */
+  src: string
+  /** Session ID to connect to */
+  sessionId?: string
+  /** Additional URL parameters */
+  params?: Record<string, string>
+  /** Called when terminal outputs data */
+  onOutput?: (data: string) => void
+  /** Called when terminal resizes */
+  onResize?: (size: { cols: number; rows: number }) => void
+  /** Called when terminal is ready */
+  onReady?: (sessionId: string) => void
+  /** Called on terminal error */
+  onError?: (error: string, code?: string) => void
+  /** Called when terminal disconnects */
+  onDisconnect?: (reason?: string) => void
+  /** iframe width */
+  width?: string | number
+  /** iframe height */
+  height?: string | number
+  /** Additional CSS class */
+  className?: string
+  /** iframe title for accessibility */
+  title?: string
+  /** Allow clipboard access */
+  allowClipboard?: boolean
+  /** Custom iframe sandbox permissions */
+  sandbox?: string
+}
+
+interface TerminalEmbedRef {
+  sendInput: (data: string) => void
+}
+```
+
+### Terminal Message Types (iframe postMessage)
+
+```typescript
+interface TerminalInputMessage {
+  type: 'terminal:input'
+  data: string
+}
+
+interface TerminalOutputMessage {
+  type: 'terminal:output'
+  data: string
+}
+
+interface TerminalResizeMessage {
+  type: 'terminal:resize'
+  cols: number
+  rows: number
+}
+
+interface TerminalReadyMessage {
+  type: 'terminal:ready'
+  sessionId: string
+}
+
+interface TerminalErrorMessage {
+  type: 'terminal:error'
+  error: string
+  code?: string
+}
+
+interface TerminalDisconnectedMessage {
+  type: 'terminal:disconnected'
+  reason?: string
+}
+
+type TerminalMessage =
+  | TerminalInputMessage
+  | TerminalOutputMessage
+  | TerminalResizeMessage
+  | TerminalReadyMessage
+  | TerminalErrorMessage
+  | TerminalDisconnectedMessage
+```
+
+## Type Guards
+
+Utility functions for runtime type checking.
+
+### Message Type Guards
+
+```typescript
+import {
+  isAssistantMessage,
+  isUserMessage,
+  isSystemMessage,
+  isResultMessage,
+  isPartialMessage,
+  isTextBlock,
+  isToolUseBlock,
+  isToolResultBlock,
+} from '@dotdo/claude'
+
+// Check message types
+if (isAssistantMessage(msg)) {
+  // msg is SDKAssistantMessage
+}
+
+if (isResultMessage(msg)) {
+  // msg is SDKResultMessage
+}
+
+// Check content block types
+if (isTextBlock(block)) {
+  // block is TextBlock
+}
+
+if (isToolUseBlock(block)) {
+  // block is ToolUseBlock
+}
+```
+
+### Terminal Message Type Guard
+
+```typescript
+import { isTerminalMessage } from '@dotdo/terminal/embed'
+
+// Check if postMessage data is a terminal message
+if (isTerminalMessage(event.data)) {
+  // event.data is TerminalMessage
+}
+```
+
+## Validation Functions
+
+Runtime validation utilities for configuration objects.
+
+```typescript
+import { validateOptions, safeValidateOptions } from '@dotdo/claude'
+
+// Throws Error if options are invalid
+const options = validateOptions(userInput)
+
+// Returns undefined if invalid (no throw)
+const safeOptions = safeValidateOptions(userInput)
+if (safeOptions) {
+  // Valid options
+}
+```
+
+## Next Steps
+
+- [SDK Types](/sdk/types) - Type definitions with usage examples
+- [Error Codes](/reference/error-codes) - Error handling and recovery
+- [Client Reference](/sdk/client) - Client API documentation
+- [Server Reference](/sdk/server) - Server-side implementation

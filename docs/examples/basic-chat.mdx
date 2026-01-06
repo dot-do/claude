@@ -1,0 +1,364 @@
+---
+title: Basic Chat
+description: A simple chat interface demonstrating core SDK functionality and message handling with Claude Code.
+---
+
+This example demonstrates how to build a basic chat interface using the Claude Code SDK. You will learn how to set up a client connection, manage chat messages, and integrate with the Chat component.
+
+## Prerequisites
+
+Before starting, ensure you have:
+
+| Requirement | Version | Purpose |
+|-------------|---------|---------|
+| Node.js | 18+ | Runtime |
+| npm/pnpm | Latest | Package manager |
+| Claude API Key | - | Authentication |
+
+## Installation
+
+Install the required packages:
+
+```bash
+npm install @anthropic/claude-sdk @anthropic/terminal react react-dom
+```
+
+## Project Setup
+
+Create a new React application or add to an existing project:
+
+```bash
+npx create-react-app basic-chat --template typescript
+cd basic-chat
+npm install @anthropic/claude-sdk @anthropic/terminal
+```
+
+## Complete Example
+
+Here is the full working code for a basic chat application:
+
+```tsx title="App.tsx"
+import { useState, useCallback, useEffect } from 'react';
+import { createClaudeClient, ClaudeClient, ClaudeClientError } from '@anthropic/claude-sdk';
+import { Chat, ChatMessage } from '@anthropic/terminal';
+
+// Configure the Claude client
+const client = createClaudeClient({
+  serverUrl: process.env.REACT_APP_CLAUDE_SERVER_URL || 'ws://localhost:3000',
+  apiKey: process.env.REACT_APP_CLAUDE_API_KEY,
+  reconnect: true,
+  reconnectAttempts: 3,
+  onConnect: () => console.log('Connected to Claude server'),
+  onDisconnect: () => console.log('Disconnected from Claude server'),
+  onError: (error) => console.error('Client error:', error.message),
+});
+
+function App() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+
+  // Initialize connection and session
+  useEffect(() => {
+    async function initialize() {
+      try {
+        await client.connect();
+        setIsConnected(true);
+
+        const session = await client.createSession({
+          model: 'claude-opus-4-5-20250101',
+          systemPrompt: 'You are a helpful assistant.',
+        });
+
+        setSessionId(session.id);
+        setError(null);
+      } catch (err) {
+        if (err instanceof ClaudeClientError) {
+          setError(`Connection failed: ${err.message}`);
+        } else {
+          setError('An unexpected error occurred');
+        }
+      }
+    }
+
+    initialize();
+
+    // Cleanup on unmount
+    return () => {
+      client.disconnect();
+    };
+  }, []);
+
+  // Handle sending messages
+  const handleSend = useCallback(async (content: string) => {
+    if (!sessionId) {
+      setError('No active session');
+      return;
+    }
+
+    // Add user message to the chat
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content,
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Create placeholder for assistant response
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content: '',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, assistantMessage]);
+
+      // Stream the response from Claude
+      const events = client.sendMessage(sessionId, content);
+
+      for await (const event of events) {
+        switch (event.type) {
+          case 'text':
+            // Update the assistant message with streamed content
+            setMessages(prev => {
+              const updated = [...prev];
+              const lastMessage = updated[updated.length - 1];
+              updated[updated.length - 1] = {
+                ...lastMessage,
+                content: lastMessage.content + event.content,
+              };
+              return updated;
+            });
+            break;
+
+          case 'error':
+            setError(`Response error: ${event.error.message}`);
+            break;
+
+          case 'done':
+            console.log(`Tokens used: ${event.usage.inputTokens + event.usage.outputTokens}`);
+            break;
+        }
+      }
+    } catch (err) {
+      if (err instanceof ClaudeClientError) {
+        setError(`Failed to send message: ${err.message}`);
+      } else {
+        setError('An unexpected error occurred');
+      }
+
+      // Remove the empty assistant message on error
+      setMessages(prev => prev.slice(0, -1));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sessionId]);
+
+  // Show connection status
+  if (!isConnected) {
+    return (
+      <div className="connection-status">
+        {error ? (
+          <p className="error">{error}</p>
+        ) : (
+          <p>Connecting to Claude server...</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      {error && (
+        <div className="error-banner">
+          {error}
+        </div>
+      )}
+
+      <Chat
+        messages={messages}
+        onSend={handleSend}
+        isLoading={isLoading}
+      />
+    </div>
+  );
+}
+
+export default App;
+```
+
+## Step-by-Step Breakdown
+
+### 1. Client Configuration
+
+First, create a Claude client with your server URL and API key:
+
+```typescript title="client-config.ts"
+import { createClaudeClient } from '@anthropic/claude-sdk';
+
+const client = createClaudeClient({
+  serverUrl: 'ws://localhost:3000',
+  apiKey: process.env.REACT_APP_CLAUDE_API_KEY,
+  reconnect: true,          // Auto-reconnect on disconnect
+  reconnectAttempts: 3,     // Try up to 3 times before giving up
+});
+```
+
+The client handles WebSocket connections and automatic reconnection.
+
+### 2. Session Initialization
+
+Connect to the server and create a session when the component mounts:
+
+```typescript title="session-init.ts"
+useEffect(() => {
+  async function initialize() {
+    await client.connect();                      // Establish WebSocket connection
+    const session = await client.createSession({
+      model: 'claude-opus-4-5-20250101',         // Model for this session
+      systemPrompt: 'You are a helpful assistant.',
+    });
+    setSessionId(session.id);                    // Store session ID for message sending
+  }
+  initialize();
+}, []);
+```
+
+### 3. Message Handling
+
+The `handleSend` function manages the message flow:
+
+1. Add the user message to state
+2. Create a placeholder for the assistant response
+3. Stream content from the API
+4. Update the assistant message progressively
+
+```typescript title="message-handler.ts"
+const handleSend = async (content: string) => {
+  // Step 1: Add user message immediately for responsive UI
+  setMessages(prev => [...prev, { role: 'user', content, timestamp: new Date() }]);
+
+  // Step 2-4: Stream response and update assistant message progressively
+  const events = client.sendMessage(sessionId, content);
+  for await (const event of events) {
+    if (event.type === 'text') {
+      // Append streamed text to the assistant's message
+    }
+  }
+};
+```
+
+### 4. Chat Component Integration
+
+The Chat component renders messages and handles user input:
+
+```tsx
+<Chat
+  messages={messages}
+  onSend={handleSend}
+  isLoading={isLoading}
+/>
+```
+
+## Styling
+
+Add basic styles for your chat application:
+
+```css title="App.css"
+.app {
+  max-width: 800px;
+  margin: 0 auto;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.connection-status {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+.error-banner {
+  background-color: #fee2e2;
+  color: #dc2626;
+  padding: 12px;
+  text-align: center;
+}
+
+.error {
+  color: #dc2626;
+}
+```
+
+## Environment Variables
+
+Create a `.env` file in your project root:
+
+```bash title=".env"
+REACT_APP_CLAUDE_SERVER_URL=ws://localhost:3000
+REACT_APP_CLAUDE_API_KEY=your-api-key-here
+```
+
+<Callout type="warning">
+  Never commit your API key to version control. Use environment variables and add `.env` to your `.gitignore` file.
+</Callout>
+
+## Running the Example
+
+1. Start the Claude Code server:
+
+```bash
+npx @anthropic/claude-server
+```
+
+2. In a separate terminal, start the React application:
+
+```bash
+npm start
+```
+
+3. Open your browser to `http://localhost:3000` and start chatting.
+
+## Error Handling
+
+The example includes comprehensive error handling:
+
+```typescript title="error-handling.ts"
+try {
+  const events = client.sendMessage(sessionId, content);
+  for await (const event of events) {
+    if (event.type === 'error') {
+      // Handle errors that occur during streaming
+      setError(`Response error: ${event.error.message}`);
+    }
+  }
+} catch (err) {
+  if (err instanceof ClaudeClientError) {
+    // Handle specific error types with appropriate recovery
+    switch (err.code) {
+      case 'SESSION_NOT_FOUND':
+        // Session expired - recreate it
+        break;
+      case 'CONNECTION_CLOSED':
+        // Network issue - attempt reconnection
+        break;
+      default:
+        setError(err.message);
+    }
+  }
+}
+```
+
+## Next Steps
+
+- [IDE Layout Example](/examples/ide-layout) - Build a full-featured IDE interface
+- [Embedded Terminal](/examples/embedded-terminal) - Add terminal capabilities
+- [Session Management Guide](/guides/session-management) - Persist and resume conversations
+- [Chat Component Reference](/terminal/components/chat) - Full component API

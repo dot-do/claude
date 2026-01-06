@@ -1,0 +1,446 @@
+---
+title: Cloudflare Deployment
+description: Deploy your Claude Code application to Cloudflare Workers with Durable Objects for persistent sessions
+---
+
+This guide walks you through deploying a Claude Code application to Cloudflare Workers, including setting up Durable Objects for session management and configuring the sandbox environment.
+
+## Prerequisites
+
+| Requirement | Version | Purpose |
+|-------------|---------|---------|
+| Node.js | 18+ | Runtime |
+| Wrangler CLI | 3.0+ | Cloudflare deployment tool |
+| Cloudflare Account | - | Workers and Durable Objects access |
+
+Install the Wrangler CLI if you haven't already:
+
+```bash
+npm install -g wrangler
+```
+
+Authenticate with your Cloudflare account:
+
+```bash
+wrangler login
+```
+
+## Project Setup
+
+### Initialize Your Worker
+
+Create a new Cloudflare Workers project or navigate to your existing project:
+
+```bash
+npm create cloudflare@latest my-claude-worker
+cd my-claude-worker
+```
+
+Install the Claude Code SDK:
+
+```bash
+npm install @anthropic/claude-code-sdk
+```
+
+## Wrangler Configuration
+
+Create or update your `wrangler.toml` with the following configuration:
+
+```toml title="wrangler.toml"
+name = "claude-code-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Account configuration
+account_id = "your-account-id"
+
+# Worker configuration
+[vars]
+ENVIRONMENT = "production"
+
+# Durable Objects configuration
+[durable_objects]
+bindings = [
+  { name = "CLAUDE_SESSIONS", class_name = "ClaudeSessionDO" }
+]
+
+# Migrations for Durable Objects
+[[migrations]]
+tag = "v1"
+new_classes = ["ClaudeSessionDO"]
+
+# KV namespace for caching (optional)
+[[kv_namespaces]]
+binding = "CACHE"
+id = "your-kv-namespace-id"
+
+# R2 bucket for file storage (optional)
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "claude-files"
+
+# Development settings
+[dev]
+port = 8787
+local_protocol = "http"
+```
+
+<Callout type="info">
+  Replace `your-account-id` and `your-kv-namespace-id` with your actual Cloudflare account and namespace IDs. You can find these in your Cloudflare dashboard.
+</Callout>
+
+## Durable Object Bindings
+
+Durable Objects provide persistent, stateful sessions for Claude Code interactions. Create the Durable Object class:
+
+```typescript title="src/durable-objects/claude-session.ts"
+import { DurableObject } from 'cloudflare:workers';
+
+export interface SessionState {
+  conversationId: string;
+  messages: Array<{ role: string; content: string }>;
+  createdAt: number;
+  lastActivityAt: number;
+}
+
+export class ClaudeSessionDO extends DurableObject {
+  private state: DurableObjectState;
+  private session: SessionState | null = null;
+
+  constructor(state: DurableObjectState, env: Env) {
+    super(state, env);
+    this.state = state;
+  }
+
+  async initialize(conversationId: string): Promise<SessionState> {
+    const existing = await this.state.storage.get<SessionState>('session');
+
+    if (existing) {
+      this.session = existing;
+      return existing;
+    }
+
+    this.session = {
+      conversationId,
+      messages: [],
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+    };
+
+    await this.state.storage.put('session', this.session);
+    return this.session;
+  }
+
+  async addMessage(role: string, content: string): Promise<void> {
+    if (!this.session) {
+      throw new Error('Session not initialized');
+    }
+
+    this.session.messages.push({ role, content });
+    this.session.lastActivityAt = Date.now();
+    await this.state.storage.put('session', this.session);
+  }
+
+  async getSession(): Promise<SessionState | null> {
+    if (!this.session) {
+      this.session = await this.state.storage.get<SessionState>('session') ?? null;
+    }
+    return this.session;
+  }
+
+  async clearSession(): Promise<void> {
+    this.session = null;
+    await this.state.storage.deleteAll();
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    switch (url.pathname) {
+      case '/initialize': {
+        const { conversationId } = await request.json();
+        const session = await this.initialize(conversationId);
+        return Response.json(session);
+      }
+
+      case '/message': {
+        const { role, content } = await request.json();
+        await this.addMessage(role, content);
+        return Response.json({ success: true });
+      }
+
+      case '/session': {
+        const session = await this.getSession();
+        return Response.json(session);
+      }
+
+      case '/clear': {
+        await this.clearSession();
+        return Response.json({ success: true });
+      }
+
+      default:
+        return new Response('Not found', { status: 404 });
+    }
+  }
+}
+```
+
+## Sandbox Setup
+
+Configure the sandbox environment for secure code execution within Workers:
+
+```typescript title="src/sandbox/config.ts"
+export interface SandboxConfig {
+  maxExecutionTime: number;
+  maxMemory: number;
+  allowedModules: string[];
+  networkAccess: boolean;
+}
+
+export const sandboxConfig: SandboxConfig = {
+  maxExecutionTime: 30000, // 30 seconds
+  maxMemory: 128 * 1024 * 1024, // 128MB
+  allowedModules: [
+    'crypto',
+    'buffer',
+    'util',
+    'path',
+  ],
+  networkAccess: false,
+};
+
+export function createSandboxHeaders(): Headers {
+  return new Headers({
+    'Content-Security-Policy': "default-src 'none'; script-src 'self'",
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+  });
+}
+```
+
+Create the main worker entry point with sandbox integration:
+
+```typescript title="src/index.ts"
+import { ClaudeSessionDO } from './durable-objects/claude-session';
+import { sandboxConfig, createSandboxHeaders } from './sandbox/config';
+
+export { ClaudeSessionDO };
+
+export interface Env {
+  CLAUDE_SESSIONS: DurableObjectNamespace;
+  ANTHROPIC_API_KEY: string;
+  CACHE: KVNamespace;
+  FILES: R2Bucket;
+  ENVIRONMENT: string;
+}
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Health check endpoint
+    if (url.pathname === '/health') {
+      return Response.json({ status: 'ok', environment: env.ENVIRONMENT });
+    }
+
+    // Session management
+    if (url.pathname.startsWith('/session/')) {
+      const sessionId = url.pathname.split('/')[2];
+      const id = env.CLAUDE_SESSIONS.idFromName(sessionId);
+      const stub = env.CLAUDE_SESSIONS.get(id);
+
+      const sessionUrl = new URL(request.url);
+      sessionUrl.pathname = url.pathname.replace(`/session/${sessionId}`, '');
+
+      return stub.fetch(new Request(sessionUrl, request));
+    }
+
+    // Claude API proxy with sandbox restrictions
+    if (url.pathname === '/api/claude') {
+      if (request.method !== 'POST') {
+        return new Response('Method not allowed', { status: 405 });
+      }
+
+      const body = await request.json();
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(body),
+      });
+
+      const headers = createSandboxHeaders();
+      headers.set('Content-Type', 'application/json');
+
+      return new Response(response.body, {
+        status: response.status,
+        headers,
+      });
+    }
+
+    return new Response('Not found', { status: 404 });
+  },
+};
+```
+
+## Environment Variables and Secrets
+
+### Setting Secrets
+
+Use Wrangler to securely store your API keys and sensitive configuration:
+
+```bash
+# Set the Anthropic API key
+wrangler secret put ANTHROPIC_API_KEY
+```
+
+When prompted, enter your API key. The secret is encrypted and stored securely.
+
+### Additional Secrets
+
+Set any additional secrets your application requires:
+
+```bash
+# Database connection string (if using external database)
+wrangler secret put DATABASE_URL
+
+# Webhook signing secret
+wrangler secret put WEBHOOK_SECRET
+
+# Custom encryption key
+wrangler secret put ENCRYPTION_KEY
+```
+
+### Environment-Specific Variables
+
+For non-sensitive environment variables, add them to `wrangler.toml`:
+
+```toml title="wrangler.toml"
+[vars]
+ENVIRONMENT = "production"
+LOG_LEVEL = "info"
+MAX_REQUESTS_PER_MINUTE = "100"
+
+# Staging environment overrides
+[env.staging.vars]
+ENVIRONMENT = "staging"
+LOG_LEVEL = "debug"
+MAX_REQUESTS_PER_MINUTE = "1000"
+```
+
+<Callout type="warning">
+  Never commit API keys or secrets to version control. Always use `wrangler secret put` for sensitive values.
+</Callout>
+
+### Listing Secrets
+
+View all configured secrets (names only, not values):
+
+```bash
+wrangler secret list
+```
+
+## Deploy Commands
+
+### Development
+
+Run your worker locally for development:
+
+```bash
+wrangler dev
+```
+
+This starts a local server at `http://localhost:8787` with hot reloading.
+
+### Staging Deployment
+
+Deploy to a staging environment for testing:
+
+```bash
+wrangler deploy --env staging
+```
+
+### Production Deployment
+
+Deploy to production:
+
+```bash
+wrangler deploy
+```
+
+### Deployment Verification
+
+After deployment, verify your worker is running:
+
+```bash
+# Check worker status
+wrangler deployments list
+
+# View recent logs
+wrangler tail
+
+# Test the health endpoint
+curl https://your-worker.your-subdomain.workers.dev/health
+```
+
+### Rollback
+
+If you need to rollback to a previous version:
+
+```bash
+# List recent deployments
+wrangler deployments list
+
+# Rollback to a specific deployment
+wrangler rollback --deployment-id <deployment-id>
+```
+
+## Complete Deployment Checklist
+
+Follow these steps for a successful deployment:
+
+| Step | Command | Verification |
+|------|---------|--------------|
+| 1. Authenticate | `wrangler login` | Browser opens for auth |
+| 2. Set secrets | `wrangler secret put ANTHROPIC_API_KEY` | Secret stored message |
+| 3. Create KV namespace | `wrangler kv:namespace create CACHE` | Namespace ID returned |
+| 4. Create R2 bucket | `wrangler r2 bucket create claude-files` | Bucket created message |
+| 5. Deploy | `wrangler deploy` | Deployment URL returned |
+| 6. Verify | `curl <url>/health` | `{"status":"ok"}` |
+
+## Troubleshooting
+
+### Common Issues
+
+**Durable Object not found:**
+
+Ensure your migrations are configured correctly in `wrangler.toml` and run:
+
+```bash
+wrangler deploy
+```
+
+**API key errors:**
+
+Verify your secret is set correctly:
+
+```bash
+wrangler secret list
+```
+
+**Memory limits exceeded:**
+
+Cloudflare Workers have a 128MB memory limit. Optimize your code or use Durable Objects to offload state.
+
+## Next Steps
+
+- [Session Management](/guides/session-management) - Learn about managing Claude sessions
+- [SDK Overview](/sdk) - Complete SDK documentation
+- [Authentication Guide](/guides/authentication) - Secure your deployment
+- [Streaming Guide](/guides/streaming) - Real-time response handling

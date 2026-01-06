@@ -1,0 +1,417 @@
+---
+title: Authentication
+description: Add authentication to your Claude Code SDK applications with JWT tokens, API keys, and rate limiting
+---
+
+Securing your Claude Code SDK applications requires a layered approach combining authentication, authorization, and rate limiting. This guide covers common patterns for Cloudflare Workers and edge deployments.
+
+## Authentication Methods
+
+Choose an authentication strategy based on your use case:
+
+| Method | Best For | Security Level |
+|--------|----------|----------------|
+| API Keys | Server-to-server | Medium |
+| JWT Tokens | User sessions | High |
+| Combined | Production apps | Highest |
+
+## API Key Authentication
+
+API keys provide a simple authentication mechanism for server-to-server communication.
+
+### Basic Implementation
+
+```typescript title="api-key-auth.ts"
+interface AuthResult {
+  valid: boolean;
+  clientId?: string;
+  scopes?: string[];
+}
+
+async function validateApiKey(
+  apiKey: string,
+  env: { API_KEYS: KVNamespace }
+): Promise<AuthResult> {
+  if (!apiKey || !apiKey.startsWith('sk_')) {
+    return { valid: false };
+  }
+
+  const keyData = await env.API_KEYS.get(apiKey, 'json');
+
+  if (!keyData) {
+    return { valid: false };
+  }
+
+  return {
+    valid: true,
+    clientId: keyData.clientId,
+    scopes: keyData.scopes,
+  };
+}
+```
+
+### Extracting API Keys from Requests
+
+```typescript title="extract-key.ts"
+function extractApiKey(request: Request): string | null {
+  // Check Authorization header first
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    return authHeader.slice(7);
+  }
+
+  // Fall back to X-API-Key header
+  const apiKeyHeader = request.headers.get('X-API-Key');
+  if (apiKeyHeader) {
+    return apiKeyHeader;
+  }
+
+  // Check query parameter (not recommended for production)
+  const url = new URL(request.url);
+  return url.searchParams.get('api_key');
+}
+```
+
+## JWT Token Validation
+
+JWT tokens enable stateless authentication with embedded claims for user sessions.
+
+### Token Verification
+
+```typescript title="jwt-validation.ts"
+import { jwtVerify, JWTPayload } from 'jose';
+
+interface TokenClaims extends JWTPayload {
+  sub: string;
+  email?: string;
+  roles?: string[];
+}
+
+async function validateJWT(
+  token: string,
+  secret: string
+): Promise<{ valid: boolean; claims?: TokenClaims }> {
+  try {
+    const secretKey = new TextEncoder().encode(secret);
+
+    const { payload } = await jwtVerify(token, secretKey, {
+      algorithms: ['HS256'],
+      issuer: 'your-app',
+      audience: 'claude-sdk',
+    });
+
+    // Check expiration
+    if (payload.exp && payload.exp < Date.now() / 1000) {
+      return { valid: false };
+    }
+
+    return {
+      valid: true,
+      claims: payload as TokenClaims,
+    };
+  } catch (error) {
+    console.error('JWT validation failed:', error);
+    return { valid: false };
+  }
+}
+```
+
+### Token Generation
+
+```typescript title="jwt-generation.ts"
+import { SignJWT } from 'jose';
+
+async function generateToken(
+  userId: string,
+  secret: string,
+  options: { expiresIn?: string; roles?: string[] } = {}
+): Promise<string> {
+  const secretKey = new TextEncoder().encode(secret);
+
+  const token = await new SignJWT({
+    sub: userId,
+    roles: options.roles || ['user'],
+  })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setIssuedAt()
+    .setIssuer('your-app')
+    .setAudience('claude-sdk')
+    .setExpirationTime(options.expiresIn || '1h')
+    .sign(secretKey);
+
+  return token;
+}
+```
+
+## Rate Limiting
+
+Protect your API from abuse with rate limiting based on client identity.
+
+### Sliding Window Rate Limiter
+
+```typescript title="rate-limiter.ts"
+interface RateLimitResult {
+  allowed: boolean;
+  remaining: number;
+  resetAt: number;
+}
+
+async function checkRateLimit(
+  clientId: string,
+  env: { RATE_LIMITS: KVNamespace },
+  options: { limit: number; windowMs: number }
+): Promise<RateLimitResult> {
+  const { limit, windowMs } = options;
+  const now = Date.now();
+  const windowStart = now - windowMs;
+  const key = `rate:${clientId}`;
+
+  // Get existing requests
+  const data = await env.RATE_LIMITS.get(key, 'json') as {
+    requests: number[];
+  } | null;
+
+  const requests = data?.requests || [];
+
+  // Filter to current window
+  const recentRequests = requests.filter(ts => ts > windowStart);
+
+  if (recentRequests.length >= limit) {
+    const oldestInWindow = Math.min(...recentRequests);
+    return {
+      allowed: false,
+      remaining: 0,
+      resetAt: oldestInWindow + windowMs,
+    };
+  }
+
+  // Add current request
+  recentRequests.push(now);
+
+  // Store updated requests
+  await env.RATE_LIMITS.put(
+    key,
+    JSON.stringify({ requests: recentRequests }),
+    { expirationTtl: Math.ceil(windowMs / 1000) + 60 }
+  );
+
+  return {
+    allowed: true,
+    remaining: limit - recentRequests.length,
+    resetAt: now + windowMs,
+  };
+}
+```
+
+### Rate Limit Response Headers
+
+```typescript title="rate-limit-headers.ts"
+function addRateLimitHeaders(
+  response: Response,
+  result: RateLimitResult,
+  limit: number
+): Response {
+  const headers = new Headers(response.headers);
+
+  headers.set('X-RateLimit-Limit', String(limit));
+  headers.set('X-RateLimit-Remaining', String(result.remaining));
+  headers.set('X-RateLimit-Reset', String(Math.ceil(result.resetAt / 1000)));
+
+  return new Response(response.body, {
+    status: response.status,
+    headers,
+  });
+}
+```
+
+## Middleware Patterns for Workers
+
+Compose authentication and rate limiting into reusable middleware.
+
+### Authentication Middleware
+
+```typescript title="auth-middleware.ts"
+type Handler = (
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext
+) => Promise<Response>;
+
+interface AuthenticatedRequest extends Request {
+  auth: {
+    clientId: string;
+    scopes: string[];
+    type: 'api_key' | 'jwt';
+  };
+}
+
+function withAuth(handler: Handler): Handler {
+  return async (request, env, ctx) => {
+    // Try API key first
+    const apiKey = extractApiKey(request);
+    if (apiKey) {
+      const result = await validateApiKey(apiKey, env);
+      if (result.valid) {
+        (request as AuthenticatedRequest).auth = {
+          clientId: result.clientId!,
+          scopes: result.scopes || [],
+          type: 'api_key',
+        };
+        return handler(request, env, ctx);
+      }
+    }
+
+    // Try JWT token
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.slice(7);
+      const result = await validateJWT(token, env.JWT_SECRET);
+      if (result.valid) {
+        (request as AuthenticatedRequest).auth = {
+          clientId: result.claims!.sub,
+          scopes: result.claims!.roles || [],
+          type: 'jwt',
+        };
+        return handler(request, env, ctx);
+      }
+    }
+
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+}
+```
+
+### Rate Limiting Middleware
+
+```typescript title="rate-limit-middleware.ts"
+interface RateLimitOptions {
+  limit: number;
+  windowMs: number;
+  keyFn?: (request: Request) => string;
+}
+
+function withRateLimit(
+  handler: Handler,
+  options: RateLimitOptions
+): Handler {
+  return async (request, env, ctx) => {
+    const authReq = request as AuthenticatedRequest;
+    const clientId = options.keyFn?.(request) || authReq.auth?.clientId || getClientIP(request);
+
+    const result = await checkRateLimit(clientId, env, {
+      limit: options.limit,
+      windowMs: options.windowMs,
+    });
+
+    if (!result.allowed) {
+      return new Response(JSON.stringify({
+        error: 'Rate limit exceeded',
+        retryAfter: Math.ceil((result.resetAt - Date.now()) / 1000),
+      }), {
+        status: 429,
+        headers: {
+          'Content-Type': 'application/json',
+          'Retry-After': String(Math.ceil((result.resetAt - Date.now()) / 1000)),
+        },
+      });
+    }
+
+    const response = await handler(request, env, ctx);
+    return addRateLimitHeaders(response, result, options.limit);
+  };
+}
+
+function getClientIP(request: Request): string {
+  return request.headers.get('CF-Connecting-IP') ||
+         request.headers.get('X-Forwarded-For')?.split(',')[0] ||
+         'unknown';
+}
+```
+
+### Composing Middleware
+
+```typescript title="worker.ts"
+import { ClaudeCode } from '@anthropic-ai/claude-code-sdk';
+
+interface Env {
+  API_KEYS: KVNamespace;
+  RATE_LIMITS: KVNamespace;
+  JWT_SECRET: string;
+  ANTHROPIC_API_KEY: string;
+}
+
+const handler: Handler = async (request, env, ctx) => {
+  const authReq = request as AuthenticatedRequest;
+
+  const claude = new ClaudeCode({
+    apiKey: env.ANTHROPIC_API_KEY,
+  });
+
+  const body = await request.json();
+
+  const response = await claude.sendMessage({
+    prompt: body.prompt,
+    metadata: {
+      clientId: authReq.auth.clientId,
+    },
+  });
+
+  return new Response(JSON.stringify(response), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+// Compose middleware
+const authenticatedHandler = withAuth(handler);
+const rateLimitedHandler = withRateLimit(authenticatedHandler, {
+  limit: 100,
+  windowMs: 60 * 1000, // 1 minute
+});
+
+export default {
+  fetch: rateLimitedHandler,
+};
+```
+
+## Security Best Practices
+
+<Callout type="warning">
+  Never expose API keys or JWT secrets in client-side code. Always validate tokens server-side.
+</Callout>
+
+Follow these guidelines for production deployments:
+
+| Practice | Implementation |
+|----------|----------------|
+| Rotate secrets | Use versioned secrets with graceful rotation |
+| Audit logging | Log authentication events for security review |
+| Scope permissions | Use minimal scopes required for each client |
+| Secure storage | Store secrets in Workers Secrets, not environment variables |
+| HTTPS only | Reject non-HTTPS requests in production |
+
+### Secure Secret Storage
+
+```typescript title="secrets.ts"
+// Access secrets securely in Workers
+export default {
+  async fetch(request: Request, env: Env) {
+    // Secrets are accessed via env bindings
+    // Never log or expose these values
+    const jwtSecret = env.JWT_SECRET;
+    const apiKey = env.ANTHROPIC_API_KEY;
+
+    // Use secrets for validation only
+    // ...
+  },
+};
+```
+
+## Next Steps
+
+- [Error Codes Reference](/reference/error-codes) - Handle authentication failures gracefully
+- [Streaming Guide](/guides/streaming) - Secure streaming endpoints
+- [RPC Layer](/sdk/rpc) - WebSocket RPC communication
+- [Cloudflare Deployment](/guides/cloudflare-deployment) - Deploy to production

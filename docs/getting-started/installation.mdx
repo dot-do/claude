@@ -1,0 +1,167 @@
+---
+title: Installation
+description: Install and configure @dotdo/claude packages for building AI-powered applications with Claude Code integration.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## Package Installation
+
+The `@dotdo/claude` SDK provides the core functionality for interacting with Claude Code, while `@dotdo/terminal` offers a pre-built terminal UI component.
+
+<Tabs items={['npm', 'pnpm', 'yarn']}>
+  <Tab value="npm">
+    ```bash
+    npm install @dotdo/claude @dotdo/terminal
+    ```
+  </Tab>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @dotdo/claude @dotdo/terminal
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @dotdo/claude @dotdo/terminal
+    ```
+  </Tab>
+</Tabs>
+
+## Peer Dependencies
+
+Both packages require React 18 or later as a peer dependency:
+
+<Tabs items={['npm', 'pnpm', 'yarn']}>
+  <Tab value="npm">
+    ```bash
+    npm install react@^18 react-dom@^18
+    ```
+  </Tab>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add react@^18 react-dom@^18
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add react@^18 react-dom@^18
+    ```
+  </Tab>
+</Tabs>
+
+### Optional Dependencies
+
+For sandboxed code execution in Cloudflare Workers, install the sandbox package:
+
+<Tabs items={['npm', 'pnpm', 'yarn']}>
+  <Tab value="npm">
+    ```bash
+    npm install @cloudflare/sandbox
+    ```
+  </Tab>
+  <Tab value="pnpm">
+    ```bash
+    pnpm add @cloudflare/sandbox
+    ```
+  </Tab>
+  <Tab value="yarn">
+    ```bash
+    yarn add @cloudflare/sandbox
+    ```
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+  The `@cloudflare/sandbox` package is only required if you plan to run Claude Code in a sandboxed Cloudflare Worker environment.
+</Callout>
+
+## TypeScript Configuration
+
+The SDK is written in TypeScript and includes type definitions out of the box. For optimal type checking, ensure your `tsconfig.json` includes these settings:
+
+```json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "jsx": "react-jsx"
+  }
+}
+```
+
+<Callout type="warn">
+  The SDK uses ES modules exclusively. Ensure your project is configured for ESM by setting `"type": "module"` in your `package.json` or using `.mjs` file extensions.
+</Callout>
+
+## Cloudflare Wrangler Setup
+
+If you're deploying to Cloudflare Workers, you'll need to configure Wrangler. Create a `wrangler.toml` file in your project root:
+
+```toml title="wrangler.toml"
+name = "my-claude-app"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ANTHROPIC_API_KEY = ""
+```
+
+<Callout type="error">
+  Never commit your `ANTHROPIC_API_KEY` to version control. Use Wrangler secrets for production deployments:
+
+  ```bash
+  npx wrangler secret put ANTHROPIC_API_KEY
+  ```
+</Callout>
+
+### Development Mode
+
+Run your Worker locally with hot reloading:
+
+```bash
+npx wrangler dev
+```
+
+### Deployment
+
+Deploy to Cloudflare's edge network:
+
+```bash
+npx wrangler deploy
+```
+
+## Verifying Installation
+
+Create a simple test file to verify everything is working:
+
+```typescript title="test-install.ts"
+import { ClaudeClient } from '@dotdo/claude';
+
+const client = new ClaudeClient({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+console.log('Claude SDK installed successfully!');
+```
+
+Run with:
+
+```bash
+npx tsx test-install.ts
+```
+
+## Next Steps
+
+Once installed, you can proceed to:
+
+- [Quick Start](/getting-started/quick-start) - Build your first Claude-powered application
+- [Core Concepts](/getting-started/concepts) - Learn about sessions, RPC, and event streaming
+- [Terminal Components](/terminal/components) - Integrate the pre-built terminal UI
+- [SDK Overview](/sdk) - Explore the full SDK API

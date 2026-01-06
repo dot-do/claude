@@ -1,0 +1,443 @@
+---
+title: Event System
+description: Type-safe event subscription and emission with TypedEventEmitter for ClaudeCode events
+---
+
+The Events module provides a type-safe event emitter for subscribing to and handling ClaudeCode events. It supports specific event subscriptions, one-time listeners, wildcard subscriptions, and session-scoped event keys.
+
+## Installation
+
+```bash
+npm install @dotdo/claude
+```
+
+## Quick Start
+
+```typescript
+import { TypedEventEmitter, EventKeys } from '@dotdo/claude'
+
+const emitter = new TypedEventEmitter()
+
+// Subscribe to session events
+const unsubscribe = emitter.on(EventKeys.todo('session-123'), (todos) => {
+  console.log('Todos updated:', todos)
+})
+
+// Emit an event
+emitter.emit(EventKeys.todo('session-123'), { todos: [...] })
+
+// Unsubscribe when done
+unsubscribe()
+```
+
+## TypedEventEmitter
+
+The core class for type-safe event subscription and emission.
+
+```typescript
+import { TypedEventEmitter } from '@dotdo/claude'
+
+const emitter = new TypedEventEmitter()
+```
+
+### Methods
+
+#### `on(event, callback)`
+
+Subscribe to an event. Returns an unsubscribe function.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | `string` | Yes | Event name to subscribe to |
+| `callback` | `(data: T) => void` | Yes | Function called when event is emitted |
+
+**Returns:** `() => void` - Unsubscribe function
+
+**Example:**
+
+```typescript
+const emitter = new TypedEventEmitter()
+
+const unsubscribe = emitter.on<{ message: string }>('output:session-123', (data) => {
+  console.log('Received:', data.message)
+})
+
+// Later, unsubscribe
+unsubscribe()
+```
+
+#### `once(event, callback)`
+
+Subscribe to an event once. The callback is automatically removed after the first emission.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | `string` | Yes | Event name to subscribe to |
+| `callback` | `(data: T) => void` | Yes | Function called once when event is emitted |
+
+**Returns:** `() => void` - Unsubscribe function (if you need to cancel before emission)
+
+**Example:**
+
+```typescript
+emitter.once<{ result: string }>('result:session-123', (data) => {
+  console.log('Final result:', data.result)
+})
+```
+
+#### `onAny(callback)`
+
+Subscribe to all events (wildcard listener). Receives both the event name and data.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `callback` | `(payload: { event: string; data: T }) => void` | Yes | Function called for every event |
+
+**Returns:** `() => void` - Unsubscribe function
+
+**Example:**
+
+```typescript
+const unsubscribe = emitter.onAny(({ event, data }) => {
+  console.log(`Event ${event}:`, data)
+})
+
+// This logs all events across all sessions
+emitter.emit('todo:session-1', { todos: [] })
+emitter.emit('output:session-2', { text: 'Hello' })
+```
+
+#### `emit(event, data)`
+
+Emit an event to all subscribed listeners.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | `string` | Yes | Event name to emit |
+| `data` | `T` | Yes | Data to pass to listeners |
+
+**Returns:** `void`
+
+**Example:**
+
+```typescript
+emitter.emit('todo:session-123', {
+  todos: [
+    { id: '1', content: 'Build component', status: 'completed' },
+    { id: '2', content: 'Write tests', status: 'in_progress' },
+  ]
+})
+```
+
+#### `off(event?)`
+
+Remove all listeners for a specific event, or all listeners if no event is specified.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | `string` | No | Event name to clear. If omitted, clears all listeners |
+
+**Returns:** `void`
+
+**Example:**
+
+```typescript
+// Remove listeners for a specific event
+emitter.off('todo:session-123')
+
+// Remove all listeners
+emitter.off()
+```
+
+#### `listenerCount(event?)`
+
+Get the number of listeners for a specific event or all events.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | `string` | No | Event name to count. If omitted, counts all listeners |
+
+**Returns:** `number`
+
+**Example:**
+
+```typescript
+const todoListeners = emitter.listenerCount('todo:session-123')
+const totalListeners = emitter.listenerCount()
+
+console.log(`Todo listeners: ${todoListeners}`)
+console.log(`Total listeners: ${totalListeners}`)
+```
+
+#### `hasListeners(event?)`
+
+Check if there are any listeners for a specific event or any event.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | `string` | No | Event name to check. If omitted, checks for any listeners |
+
+**Returns:** `boolean`
+
+**Example:**
+
+```typescript
+if (emitter.hasListeners('todo:session-123')) {
+  console.log('Someone is listening for todos')
+}
+```
+
+#### `eventNames()`
+
+Get all event names that have active listeners.
+
+**Returns:** `string[]`
+
+**Example:**
+
+```typescript
+const events = emitter.eventNames()
+console.log('Active events:', events)
+// ['todo:session-123', 'output:session-456', ...]
+```
+
+#### `waitFor(event, timeout?)`
+
+Wait for an event to be emitted. Returns a Promise that resolves with the event data.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event` | `string` | Yes | Event name to wait for |
+| `timeout` | `number` | No | Timeout in milliseconds |
+
+**Returns:** `Promise<T>`
+
+**Throws:** `Error` if timeout is reached before event is emitted
+
+**Example:**
+
+```typescript
+// Wait indefinitely
+const result = await emitter.waitFor<{ result: string }>('result:session-123')
+
+// Wait with timeout
+try {
+  const result = await emitter.waitFor('result:session-123', 30000)
+  console.log('Got result:', result)
+} catch (error) {
+  console.error('Timed out waiting for result')
+}
+```
+
+## Event Keys
+
+The `EventKeys` object provides factory functions for creating session-scoped event keys.
+
+```typescript
+import { EventKeys } from '@dotdo/claude'
+```
+
+### Available Event Types
+
+| Event Key | Factory | Description |
+|-----------|---------|-------------|
+| `output` | `EventKeys.output(sessionId)` | Text output from Claude |
+| `init` | `EventKeys.init(sessionId)` | Session initialization |
+| `result` | `EventKeys.result(sessionId)` | Final result of a query |
+| `tool` | `EventKeys.tool(sessionId)` | Tool invocation started |
+| `toolResult` | `EventKeys.toolResult(sessionId)` | Tool execution completed |
+| `todo` | `EventKeys.todo(sessionId)` | Todo list updates |
+| `plan` | `EventKeys.plan(sessionId)` | Plan updates |
+| `sessionCreated` | `EventKeys.sessionCreated(sessionId)` | Session created |
+| `sessionDestroyed` | `EventKeys.sessionDestroyed(sessionId)` | Session destroyed |
+| `error` | `EventKeys.error(sessionId)` | Error occurred |
+
+**Example:**
+
+```typescript
+const sessionId = 'session-abc123'
+
+// Subscribe to different event types
+emitter.on(EventKeys.output(sessionId), (output) => {
+  console.log('Output:', output)
+})
+
+emitter.on(EventKeys.init(sessionId), (init) => {
+  console.log('Session initialized:', init)
+})
+
+emitter.on(EventKeys.result(sessionId), (result) => {
+  console.log('Final result:', result)
+})
+
+emitter.on(EventKeys.tool(sessionId), (tool) => {
+  console.log('Tool called:', tool.name)
+})
+
+emitter.on(EventKeys.todo(sessionId), (update) => {
+  console.log('Todos:', update.todos)
+})
+
+emitter.on(EventKeys.plan(sessionId), (update) => {
+  console.log('Plan:', update.plan)
+})
+
+emitter.on(EventKeys.error(sessionId), (error) => {
+  console.error('Error:', error.message)
+})
+```
+
+## sessionEvent Helper
+
+Create custom session-scoped event keys using the `sessionEvent` helper.
+
+```typescript
+import { sessionEvent } from '@dotdo/claude'
+
+// Create a custom event key
+const customEvent = sessionEvent('custom', 'session-123')
+// Returns: 'custom:session-123'
+
+emitter.on(customEvent, (data) => {
+  console.log('Custom event:', data)
+})
+```
+
+## Global Emitter
+
+For applications that need a singleton event emitter, use the global emitter functions.
+
+### getGlobalEmitter()
+
+Get or create the global event emitter instance.
+
+**Returns:** `TypedEventEmitter`
+
+```typescript
+import { getGlobalEmitter } from '@dotdo/claude'
+
+const emitter = getGlobalEmitter()
+
+// All calls return the same instance
+const sameEmitter = getGlobalEmitter()
+console.log(emitter === sameEmitter) // true
+```
+
+### resetGlobalEmitter()
+
+Reset the global emitter, removing all listeners and creating a fresh instance on next `getGlobalEmitter()` call. Useful for testing.
+
+```typescript
+import { getGlobalEmitter, resetGlobalEmitter } from '@dotdo/claude'
+
+// In your tests
+beforeEach(() => {
+  resetGlobalEmitter()
+})
+
+test('event handling', () => {
+  const emitter = getGlobalEmitter()
+  // Fresh emitter with no listeners
+})
+```
+
+## Error Handling
+
+The emitter catches and logs errors thrown by callbacks, preventing one failing handler from affecting others.
+
+```typescript
+const emitter = new TypedEventEmitter()
+
+// This handler throws
+emitter.on('message', () => {
+  throw new Error('Handler failed')
+})
+
+// This handler still runs
+emitter.on('message', (data) => {
+  console.log('Got message:', data)
+})
+
+// Both handlers are called; error is logged but doesn't propagate
+emitter.emit('message', { text: 'Hello' })
+```
+
+## Complete Example
+
+```typescript
+import {
+  TypedEventEmitter,
+  EventKeys,
+  getGlobalEmitter,
+  resetGlobalEmitter,
+} from '@dotdo/claude'
+
+// Use global emitter for app-wide events
+const emitter = getGlobalEmitter()
+
+const sessionId = 'session-abc123'
+
+// Track all events for logging
+emitter.onAny(({ event, data }) => {
+  console.log(`[${new Date().toISOString()}] ${event}`, data)
+})
+
+// Handle specific events
+emitter.on(EventKeys.output(sessionId), (output) => {
+  process.stdout.write(output.text)
+})
+
+emitter.on(EventKeys.todo(sessionId), (update) => {
+  renderTodoList(update.todos)
+})
+
+emitter.on(EventKeys.plan(sessionId), (update) => {
+  renderPlan(update.plan)
+})
+
+emitter.on(EventKeys.tool(sessionId), (tool) => {
+  showToolInvocation(tool.name, tool.input)
+})
+
+emitter.on(EventKeys.error(sessionId), (error) => {
+  showError(error.message)
+})
+
+// Wait for final result
+emitter.once(EventKeys.result(sessionId), (result) => {
+  showFinalResult(result)
+})
+
+// Or use async/await pattern
+async function waitForCompletion(sessionId: string) {
+  try {
+    const result = await emitter.waitFor(EventKeys.result(sessionId), 300000)
+    return result
+  } catch (error) {
+    console.error('Session timed out')
+    throw error
+  }
+}
+```
+
+## Next Steps
+
+- [Client Reference](/sdk/client) - Use events with the ClaudeClient
+- [RPC Reference](/sdk/rpc) - Bidirectional RPC communication
+- [Types Reference](/sdk/types) - TypeScript type definitions

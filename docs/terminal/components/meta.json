@@ -1,0 +1,13 @@
+{
+  "title": "Components",
+  "pages": [
+    "index",
+    "terminal",
+    "chat",
+    "filetree",
+    "layout",
+    "diff-viewer",
+    "session-panel",
+    "error-boundary"
+  ]
+}

@@ -1,0 +1,224 @@
+---
+title: SessionPanel
+description: A React component for managing Claude sessions with support for viewing, switching, creating, and deleting sessions.
+---
+
+The `SessionPanel` component provides a comprehensive interface for managing multiple Claude sessions. It displays session information with status indicators and allows users to switch between, create, and delete sessions.
+
+## Installation
+
+```bash
+npm install @dotdo/terminal
+```
+
+## Basic Usage
+
+```tsx title="BasicSessionPanel.tsx"
+import { SessionPanel } from '@dotdo/terminal'
+
+const sessions = [
+  { id: '1', name: 'Main Session', status: 'active' },
+  { id: '2', name: 'Debug Session', status: 'idle' },
+  { id: '3', name: 'Test Runner', status: 'disconnected' },
+]
+
+function App() {
+  return (
+    <SessionPanel
+      sessions={sessions}
+      activeSessionId="1"
+      onSelect={(id) => console.log('Selected:', id)}
+      onCreate={() => console.log('Create new session')}
+      onDelete={(id) => console.log('Delete:', id)}
+    />
+  )
+}
+```
+
+## SessionPanelProps
+
+The `SessionPanel` component accepts the following props:
+
+| Prop | Type | Required | Description |
+|------|------|----------|-------------|
+| `sessions` | `Session[]` | Yes | Array of session objects to display |
+| `activeSessionId` | `string` | No | ID of the currently active session |
+| `onSelect` | `(id: string) => void` | No | Called when a session is selected |
+| `onCreate` | `() => void` | No | Called when the create button is clicked |
+| `onDelete` | `(id: string) => void` | No | Called when a session delete is requested |
+
+## Session Type
+
+Each session object in the `sessions` array must conform to the `Session` interface:
+
+```typescript
+interface Session {
+  id: string
+  name: string
+  status: 'active' | 'idle' | 'disconnected'
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | `string` | Unique identifier for the session |
+| `name` | `string` | Display name for the session |
+| `status` | `'active' \| 'idle' \| 'disconnected'` | Current session status |
+
+## Status Indicators
+
+The `SessionPanel` displays visual indicators for each session status:
+
+| Status | Indicator | Description |
+|--------|-----------|-------------|
+| `active` | Green dot | Session is currently running and processing |
+| `idle` | Yellow dot | Session is connected but not actively processing |
+| `disconnected` | Gray dot | Session is not connected |
+
+## Full Example
+
+```tsx title="SessionManagement.tsx"
+import { useState } from 'react'
+import { SessionPanel, Session } from '@dotdo/terminal'
+
+function SessionManager() {
+  const [sessions, setSessions] = useState<Session[]>([
+    { id: '1', name: 'Development', status: 'active' },
+    { id: '2', name: 'Testing', status: 'idle' },
+  ])
+  const [activeId, setActiveId] = useState('1')
+
+  const handleCreate = () => {
+    const newSession: Session = {
+      id: String(Date.now()),
+      name: `Session ${sessions.length + 1}`,
+      status: 'idle',
+    }
+    setSessions([...sessions, newSession])
+  }
+
+  const handleDelete = (id: string) => {
+    setSessions(sessions.filter((s) => s.id !== id))
+    if (activeId === id && sessions.length > 1) {
+      setActiveId(sessions[0].id)
+    }
+  }
+
+  const handleSelect = (id: string) => {
+    setActiveId(id)
+    // Update status when selecting
+    setSessions(sessions.map((s) => ({
+      ...s,
+      status: s.id === id ? 'active' : 'idle',
+    })))
+  }
+
+  return (
+    <SessionPanel
+      sessions={sessions}
+      activeSessionId={activeId}
+      onSelect={handleSelect}
+      onCreate={handleCreate}
+      onDelete={handleDelete}
+    />
+  )
+}
+```
+
+## Handling Session State Changes
+
+Monitor and respond to session status changes:
+
+```tsx title="SessionStateHandling.tsx"
+import { useEffect, useState } from 'react'
+import { SessionPanel, Session } from '@dotdo/terminal'
+
+function App() {
+  const [sessions, setSessions] = useState<Session[]>([])
+
+  // Simulate real-time status updates
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSessions((prev) =>
+        prev.map((session) => ({
+          ...session,
+          status: checkSessionHealth(session.id),
+        }))
+      )
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  return (
+    <SessionPanel
+      sessions={sessions}
+      onSelect={(id) => {
+        const session = sessions.find((s) => s.id === id)
+        if (session?.status === 'disconnected') {
+          reconnectSession(id)
+        }
+      }}
+    />
+  )
+}
+```
+
+## Styling
+
+The `SessionPanel` component supports custom styling through className:
+
+```tsx title="StyledSessionPanel.tsx"
+import { SessionPanel } from '@dotdo/terminal'
+
+function App() {
+  return (
+    <SessionPanel
+      className="custom-session-panel"
+      sessions={sessions}
+      activeSessionId={activeId}
+    />
+  )
+}
+```
+
+```css title="styles.css"
+.custom-session-panel {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 16px;
+}
+```
+
+## Integration with Layout
+
+Combine `SessionPanel` with the `Layout` component for a complete interface:
+
+```tsx title="LayoutIntegration.tsx"
+import { Layout, SessionPanel, Terminal } from '@dotdo/terminal'
+
+function App() {
+  return (
+    <Layout>
+      <Layout.Sidebar>
+        <SessionPanel
+          sessions={sessions}
+          activeSessionId={activeId}
+          onSelect={setActiveId}
+          onCreate={createSession}
+          onDelete={deleteSession}
+        />
+      </Layout.Sidebar>
+      <Layout.Content>
+        <Terminal wsUrl={`wss://api.example.com/sessions/${activeId}`} />
+      </Layout.Content>
+    </Layout>
+  )
+}
+```
+
+## Next Steps
+
+- [Terminal Component](/terminal/components/terminal) - Connect sessions to terminal instances
+- [Layout Component](/terminal/components/layout) - Build complete UI layouts
+- [ErrorBoundary Component](/terminal/components/error-boundary) - Handle session errors gracefully

@@ -1,0 +1,111 @@
+---
+title: Terminal Package
+description: React components for building terminal interfaces and chat experiences with @dotdo/terminal
+---
+
+The `@dotdo/terminal` package provides a complete set of React components for building interactive terminal interfaces, file browsers, and conversational UIs. It includes full theming support, layout primitives, and embeddable terminal widgets.
+
+## Installation
+
+```bash
+npm install @dotdo/terminal
+```
+
+Or with your preferred package manager:
+
+```bash
+pnpm add @dotdo/terminal
+yarn add @dotdo/terminal
+```
+
+## Quick Example
+
+Here's a complete example showing how to build a terminal interface with a file tree sidebar and theme support:
+
+```tsx title="App.tsx"
+import { Terminal, FileTree, Layout, ThemeProvider } from '@dotdo/terminal'
+
+const files = [
+  { name: 'src', type: 'directory', children: [
+    { name: 'index.ts', type: 'file' },
+    { name: 'utils.ts', type: 'file' },
+  ]},
+  { name: 'package.json', type: 'file' },
+]
+
+function App() {
+  const handleFileSelect = (path: string) => {
+    console.log('Selected:', path)
+  }
+
+  return (
+    <ThemeProvider defaultMode="system">
+      <Layout
+        sidebar={<FileTree files={files} onSelect={handleFileSelect} />}
+        main={<Terminal wsUrl="wss://your-terminal-server.com/ws" />}
+      />
+    </ThemeProvider>
+  )
+}
+```
+
+## Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Terminal Emulator** | Full xterm.js integration with ANSI rendering and keyboard handling |
+| **Theme System** | Light/dark modes with system preference detection and persistence |
+| **File Browser** | Hierarchical file tree with expand/collapse and selection support |
+| **Layout Primitives** | Flexible components for arranging panels, sidebars, and content |
+| **Diff Viewer** | Side-by-side and unified diff display for code changes |
+| **Session Management** | Panel for viewing and switching between Claude sessions |
+| **Embeddable** | Iframe-based embedding with type-safe postMessage communication |
+
+## Core Exports
+
+```typescript
+import {
+  // Components
+  Terminal,
+  FileTree,
+  Layout,
+  Chat,
+  DiffViewer,
+  SessionPanel,
+  ErrorBoundary,
+
+  // Theme
+  ThemeProvider,
+  useTheme,
+  useThemeOptional,
+  darkTerminalTheme,
+  lightTerminalTheme,
+
+  // Types
+  type TerminalProps,
+  type FileTreeProps,
+  type LayoutProps,
+  type ThemeMode,
+  type ThemeColors,
+} from '@dotdo/terminal'
+```
+
+## Module Reference
+
+<Cards>
+  <Card title="Components" href="/terminal/components">
+    Terminal, FileTree, Layout, Chat, DiffViewer, SessionPanel, and ErrorBoundary components
+  </Card>
+  <Card title="Themes" href="/terminal/themes">
+    Theme system with light/dark modes, system preference detection, and custom color support
+  </Card>
+  <Card title="Embedding" href="/terminal/embedding">
+    Embed terminals in external applications with iframe and postMessage communication
+  </Card>
+</Cards>
+
+## Next Steps
+
+- [Components Reference](/terminal/components) - Detailed API documentation for all components
+- [Theme Customization](/terminal/themes) - Configure colors and appearance
+- [Embedding Guide](/terminal/embedding) - Embed terminals in your applications

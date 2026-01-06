@@ -1,0 +1,605 @@
+---
+title: ClaudeClient
+description: The main client class for connecting to and interacting with Claude Code sessions
+---
+
+The `ClaudeClient` class provides a high-level interface for managing connections to Claude Code servers, creating and managing sessions, and sending messages.
+
+## Installation
+
+```bash
+npm install @anthropic/claude-sdk
+```
+
+## Quick Start
+
+```typescript
+import { createClaudeClient } from '@anthropic/claude-sdk';
+
+const client = createClaudeClient({
+  serverUrl: 'ws://localhost:3000',
+});
+
+await client.connect();
+const session = await client.createSession({ model: 'claude-opus-4-5-20250101' });
+const response = await client.query(session.id, 'Hello, Claude!');
+console.log(response);
+```
+
+## ClaudeClientOptions
+
+Configuration options for creating a `ClaudeClient` instance.
+
+```typescript title="types.ts"
+interface ClaudeClientOptions {
+  serverUrl: string;                          // WebSocket URL of the Claude Code server
+  apiKey?: string;                            // API key for authentication
+  timeout?: number;                           // Request timeout in milliseconds
+  reconnect?: boolean;                        // Automatically reconnect on disconnect
+  reconnectAttempts?: number;                 // Maximum reconnection attempts
+  reconnectDelay?: number;                    // Delay between reconnection attempts (ms)
+  onConnect?: () => void;                     // Callback when connection is established
+  onDisconnect?: () => void;                  // Callback when connection is closed
+  onError?: (error: ClaudeClientError) => void;  // Callback when an error occurs
+}
+```
+
+| Option | Type | Required | Default | Description |
+|--------|------|----------|---------|-------------|
+| `serverUrl` | `string` | Yes | - | WebSocket URL of the Claude Code server |
+| `apiKey` | `string` | No | - | API key for authentication |
+| `timeout` | `number` | No | `30000` | Request timeout in milliseconds |
+| `reconnect` | `boolean` | No | `true` | Automatically reconnect on disconnect |
+| `reconnectAttempts` | `number` | No | `5` | Maximum reconnection attempts |
+| `reconnectDelay` | `number` | No | `1000` | Delay between reconnection attempts (ms) |
+| `onConnect` | `() => void` | No | - | Callback when connection is established |
+| `onDisconnect` | `() => void` | No | - | Callback when connection is closed |
+| `onError` | `(error) => void` | No | - | Callback when an error occurs |
+
+## Constructor
+
+Create a new `ClaudeClient` instance with the specified options.
+
+```typescript
+import { ClaudeClient } from '@anthropic/claude-sdk';
+
+const client = new ClaudeClient({
+  serverUrl: 'ws://localhost:3000',
+  apiKey: process.env.CLAUDE_API_KEY,
+  timeout: 60000,
+  reconnect: true,
+  reconnectAttempts: 3,
+  onConnect: () => console.log('Connected'),
+  onDisconnect: () => console.log('Disconnected'),
+  onError: (error) => console.error('Error:', error.message),
+});
+```
+
+## Methods
+
+### `connect()`
+
+Establishes a connection to the Claude Code server.
+
+**Returns:** `Promise<void>`
+
+**Throws:** `ClaudeClientError` if connection fails
+
+**Example:**
+
+```typescript
+const client = new ClaudeClient({ serverUrl: 'ws://localhost:3000' });
+
+try {
+  await client.connect();
+  console.log('Connected to server');
+} catch (error) {
+  if (error instanceof ClaudeClientError) {
+    console.error('Connection failed:', error.message);
+  }
+}
+```
+
+### `disconnect()`
+
+Closes the connection to the server and cleans up resources.
+
+**Returns:** `Promise<void>`
+
+**Example:**
+
+```typescript
+await client.disconnect();
+console.log('Disconnected from server');
+```
+
+### `createSession(options)`
+
+Creates a new Claude Code session with the specified options.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `options` | `CreateSessionOptions` | Yes | Session configuration |
+
+```typescript
+interface CreateSessionOptions {
+  model?: string;
+  systemPrompt?: string;
+  workingDirectory?: string;
+  environment?: Record<string, string>;
+  maxTokens?: number;
+}
+```
+
+**Returns:** `Promise<Session>`
+
+```typescript
+interface Session {
+  id: string;
+  model: string;
+  createdAt: Date;
+  status: 'active' | 'idle' | 'terminated';
+}
+```
+
+**Example:**
+
+```typescript
+const session = await client.createSession({
+  model: 'claude-opus-4-5-20250101',
+  systemPrompt: 'You are a helpful coding assistant.',
+  workingDirectory: '/path/to/project',
+  environment: {
+    NODE_ENV: 'development',
+  },
+  maxTokens: 4096,
+});
+
+console.log('Session created:', session.id);
+```
+
+### `getSession(sessionId)`
+
+Retrieves information about an existing session.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sessionId` | `string` | Yes | The session ID to retrieve |
+
+**Returns:** `Promise<Session | null>`
+
+**Example:**
+
+```typescript
+const session = await client.getSession('session-abc123');
+
+if (session) {
+  console.log('Session status:', session.status);
+  console.log('Created at:', session.createdAt);
+} else {
+  console.log('Session not found');
+}
+```
+
+### `resumeSession(sessionId)`
+
+Resumes a previously created session, restoring its context and state.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sessionId` | `string` | Yes | The session ID to resume |
+
+**Returns:** `Promise<Session>`
+
+**Throws:** `ClaudeClientError` if session cannot be resumed
+
+**Example:**
+
+```typescript
+try {
+  const session = await client.resumeSession('session-abc123');
+  console.log('Session resumed:', session.id);
+
+  // Continue where you left off
+  const response = await client.query(session.id, 'Continue from before');
+} catch (error) {
+  if (error instanceof ClaudeClientError) {
+    console.error('Failed to resume session:', error.message);
+  }
+}
+```
+
+### `listSessions(options?)`
+
+Lists all sessions, optionally filtered by status or other criteria.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `options` | `ListSessionsOptions` | No | Filter and pagination options |
+
+```typescript
+interface ListSessionsOptions {
+  status?: 'active' | 'idle' | 'terminated';
+  limit?: number;
+  offset?: number;
+}
+```
+
+**Returns:** `Promise<Session[]>`
+
+**Example:**
+
+```typescript
+// List all sessions
+const allSessions = await client.listSessions();
+console.log('Total sessions:', allSessions.length);
+
+// List only active sessions
+const activeSessions = await client.listSessions({
+  status: 'active',
+  limit: 10,
+});
+
+for (const session of activeSessions) {
+  console.log(`Session ${session.id}: ${session.status}`);
+}
+```
+
+### `destroySession(sessionId)`
+
+Terminates and removes a session, freeing up resources.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sessionId` | `string` | Yes | The session ID to destroy |
+
+**Returns:** `Promise<void>`
+
+**Example:**
+
+```typescript
+await client.destroySession('session-abc123');
+console.log('Session destroyed');
+```
+
+### `sendMessage(sessionId, message, options?)`
+
+Sends a message to a session and returns a stream of response events.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sessionId` | `string` | Yes | Target session ID |
+| `message` | `string` | Yes | The message to send |
+| `options` | `SendMessageOptions` | No | Additional options |
+
+```typescript
+interface SendMessageOptions {
+  stream?: boolean;
+  tools?: ToolDefinition[];
+  maxTokens?: number;
+}
+```
+
+**Returns:** `AsyncIterable<MessageEvent>`
+
+```typescript title="message-events.ts"
+type MessageEvent =
+  | { type: 'text'; content: string }                    // Streaming text chunk
+  | { type: 'tool_use'; name: string; input: unknown }   // Claude is invoking a tool
+  | { type: 'tool_result'; content: string }             // Tool execution result
+  | { type: 'error'; error: ClaudeClientError }          // Error during processing
+  | { type: 'done'; usage: { inputTokens: number; outputTokens: number } };  // Response complete
+```
+
+**Example:**
+
+```typescript
+const events = client.sendMessage(session.id, 'Write a hello world function');
+
+for await (const event of events) {
+  switch (event.type) {
+    case 'text':
+      process.stdout.write(event.content);
+      break;
+    case 'tool_use':
+      console.log(`Using tool: ${event.name}`);
+      break;
+    case 'done':
+      console.log(`\nTokens used: ${event.usage.inputTokens + event.usage.outputTokens}`);
+      break;
+    case 'error':
+      console.error('Error:', event.error.message);
+      break;
+  }
+}
+```
+
+### `query(sessionId, message, options?)`
+
+Sends a message and waits for the complete response. This is a convenience method that collects all events from `sendMessage`.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `sessionId` | `string` | Yes | Target session ID |
+| `message` | `string` | Yes | The message to send |
+| `options` | `QueryOptions` | No | Additional options |
+
+```typescript
+interface QueryOptions {
+  tools?: ToolDefinition[];
+  maxTokens?: number;
+  timeout?: number;
+}
+```
+
+**Returns:** `Promise<QueryResponse>`
+
+```typescript
+interface QueryResponse {
+  content: string;
+  toolCalls: ToolCall[];
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+}
+```
+
+**Example:**
+
+```typescript
+const response = await client.query(
+  session.id,
+  'What files are in the current directory?',
+  { timeout: 60000 }
+);
+
+console.log('Response:', response.content);
+console.log('Tool calls:', response.toolCalls.length);
+console.log('Tokens used:', response.usage.inputTokens + response.usage.outputTokens);
+```
+
+## ClaudeClientError
+
+Custom error class for client-related errors with additional context.
+
+```typescript
+class ClaudeClientError extends Error {
+  code: string;
+  statusCode?: number;
+  details?: unknown;
+
+  constructor(message: string, code: string, options?: {
+    statusCode?: number;
+    details?: unknown;
+    cause?: Error;
+  });
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `code` | `string` | Error code for programmatic handling |
+| `statusCode` | `number` | HTTP status code if applicable |
+| `details` | `unknown` | Additional error details |
+| `cause` | `Error` | Original error if wrapped |
+
+### Error Codes
+
+| Code | Description |
+|------|-------------|
+| `CONNECTION_FAILED` | Failed to connect to server |
+| `CONNECTION_CLOSED` | Connection was unexpectedly closed |
+| `SESSION_NOT_FOUND` | Requested session does not exist |
+| `SESSION_TERMINATED` | Session has been terminated |
+| `AUTHENTICATION_FAILED` | Invalid or missing API key |
+| `TIMEOUT` | Request exceeded timeout |
+| `INVALID_REQUEST` | Malformed request |
+
+**Example:**
+
+```typescript
+import { ClaudeClient, ClaudeClientError } from '@anthropic/claude-sdk';
+
+try {
+  await client.connect();
+} catch (error) {
+  if (error instanceof ClaudeClientError) {
+    switch (error.code) {
+      case 'CONNECTION_FAILED':
+        console.error('Could not connect to server');
+        break;
+      case 'AUTHENTICATION_FAILED':
+        console.error('Invalid API key');
+        break;
+      default:
+        console.error(`Error [${error.code}]:`, error.message);
+    }
+
+    if (error.details) {
+      console.error('Details:', error.details);
+    }
+  }
+}
+```
+
+## createClaudeClient
+
+Factory function for creating a `ClaudeClient` instance with sensible defaults.
+
+```typescript
+function createClaudeClient(options: ClaudeClientOptions): ClaudeClient;
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `options` | `ClaudeClientOptions` | Yes | Client configuration |
+
+**Returns:** `ClaudeClient`
+
+**Example:**
+
+```typescript
+import { createClaudeClient } from '@anthropic/claude-sdk';
+
+// Basic usage
+const client = createClaudeClient({
+  serverUrl: 'ws://localhost:3000',
+});
+
+// With full configuration
+const configuredClient = createClaudeClient({
+  serverUrl: process.env.CLAUDE_SERVER_URL!,
+  apiKey: process.env.CLAUDE_API_KEY,
+  timeout: 60000,
+  reconnect: true,
+  reconnectAttempts: 5,
+  reconnectDelay: 2000,
+  onConnect: () => {
+    console.log('Connected to Claude server');
+  },
+  onDisconnect: () => {
+    console.log('Disconnected from Claude server');
+  },
+  onError: (error) => {
+    console.error('Client error:', error.code, error.message);
+  },
+});
+```
+
+## Additional Types
+
+### ListFilesOptions
+
+Options for listing files in a session's working directory.
+
+```typescript title="list-files-options.ts"
+interface ListFilesOptions {
+  path?: string           // Directory path (default: working directory)
+  pattern?: string        // Glob pattern to filter files
+  recursive?: boolean     // Include subdirectories
+  includeHidden?: boolean // Include hidden files (starting with .)
+}
+```
+
+**Example:**
+
+```typescript
+const files = await client.listFiles(session.id, {
+  path: 'src',
+  pattern: '*.ts',
+  recursive: true,
+})
+```
+
+### SearchOptions
+
+Options for searching content within files.
+
+```typescript title="search-options.ts"
+interface SearchOptions {
+  path?: string           // Directory to search in
+  pattern?: string        // File pattern to include
+  caseSensitive?: boolean // Case-sensitive search (default: false)
+  maxResults?: number     // Maximum results to return
+  includeContext?: boolean // Include surrounding lines
+  contextLines?: number   // Number of context lines (default: 2)
+}
+```
+
+**Example:**
+
+```typescript
+const results = await client.search(session.id, 'TODO', {
+  path: 'src',
+  pattern: '*.ts',
+  maxResults: 50,
+  includeContext: true,
+})
+```
+
+---
+
+## Complete Example
+
+```typescript
+import { createClaudeClient, ClaudeClientError } from '@anthropic/claude-sdk';
+
+async function main() {
+  const client = createClaudeClient({
+    serverUrl: 'ws://localhost:3000',
+    apiKey: process.env.CLAUDE_API_KEY,
+    onError: (error) => console.error('Error:', error.message),
+  });
+
+  try {
+    // Connect to server
+    await client.connect();
+    console.log('Connected');
+
+    // Create a new session
+    const session = await client.createSession({
+      model: 'claude-opus-4-5-20250101',
+      workingDirectory: process.cwd(),
+    });
+    console.log('Session created:', session.id);
+
+    // Send a query
+    const response = await client.query(
+      session.id,
+      'List all TypeScript files in the current directory'
+    );
+    console.log('Response:', response.content);
+
+    // Stream a longer response
+    console.log('\nStreaming response:');
+    const events = client.sendMessage(
+      session.id,
+      'Explain the project structure'
+    );
+
+    for await (const event of events) {
+      if (event.type === 'text') {
+        process.stdout.write(event.content);
+      }
+    }
+
+    // Clean up
+    await client.destroySession(session.id);
+    await client.disconnect();
+
+  } catch (error) {
+    if (error instanceof ClaudeClientError) {
+      console.error(`Error [${error.code}]:`, error.message);
+    } else {
+      throw error;
+    }
+  }
+}
+
+main();
+```
+
+## Next Steps
+
+- [Server Configuration](/sdk/server) - Learn about server-side setup
+- [Session Management Guide](/guides/session-management) - Deep dive into session handling
+- [Streaming Guide](/guides/streaming) - Work with streaming APIs
+- [Error Codes Reference](/reference/error-codes) - Comprehensive error handling guide
+- [RPC Layer](/sdk/rpc) - Low-level RPC operations

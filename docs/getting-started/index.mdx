@@ -1,0 +1,60 @@
+---
+title: Getting Started
+description: Get started with @dotdo/claude - build Claude Code-powered web applications with the TypeScript SDK and React terminal components
+---
+
+This guide will walk you through setting up and building your first Claude Code-powered application. Whether you're creating an AI coding assistant, an embedded terminal, or a full IDE experience, you'll find everything you need to get up and running.
+
+## What You'll Learn
+
+By following this guide, you'll understand how to:
+
+- Install and configure the `@dotdo/claude` SDK and `@dotdo/terminal` packages
+- Create and manage Claude Code sessions
+- Stream real-time updates from Claude to your UI
+- Build interactive terminal and chat interfaces
+
+## Packages Overview
+
+The `@dotdo/claude` monorepo provides two main packages:
+
+### @dotdo/claude SDK
+
+The core TypeScript SDK handles all communication with Claude Code:
+
+- **RPC Client** - WebSocket-based client for real-time bidirectional communication
+- **Durable Object Server** - Cloudflare Durable Object that manages Claude Code processes
+- **Event Streaming** - Type-safe event handling for messages, todos, plans, and tool calls
+- **Session Management** - Create, resume, and manage persistent coding sessions
+
+### @dotdo/terminal
+
+React components for building terminal-based UIs:
+
+- **Terminal** - Full-featured terminal emulator with ANSI support
+- **Chat Interface** - Message-based UI for conversational interactions
+- **File Tree** - Navigable file system visualization
+- **Diff Viewer** - Side-by-side code diff display
+- **Theme System** - Customizable theming with dark/light mode support
+
+## Next Steps
+
+<Cards>
+  <Card title="Installation" href="/getting-started/installation">
+    Install the SDK and terminal packages with npm, pnpm, or yarn
+  </Card>
+  <Card title="Quick Start" href="/getting-started/quick-start">
+    Build your first Claude-powered app in under 5 minutes
+  </Card>
+  <Card title="Core Concepts" href="/getting-started/concepts">
+    Learn about sessions, RPC architecture, and event streaming
+  </Card>
+</Cards>
+
+## Prerequisites
+
+Before getting started, ensure you have:
+
+- **Node.js 18+** - Required for the SDK and build tools
+- **Cloudflare Account** - For deploying Durable Objects (free tier available)
+- **Claude API Access** - API key from Anthropic for Claude Code

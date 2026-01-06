@@ -1,0 +1,292 @@
+---
+title: DiffViewer
+description: A React component for visualizing code diffs with syntax highlighting, supporting both unified and split view modes.
+---
+
+The `DiffViewer` component displays code differences between two versions of a file. It supports unified and split view modes, syntax highlighting, and line-by-line change visualization.
+
+## Installation
+
+```bash
+npm install @dotdo/terminal
+```
+
+## Basic Usage
+
+```tsx title="BasicDiffViewer.tsx"
+import { DiffViewer } from '@dotdo/terminal'
+
+const oldCode = `function greet(name) {
+  console.log("Hello, " + name);
+}`
+
+const newCode = `function greet(name: string) {
+  console.log(\`Hello, \${name}!\`);
+}`
+
+function App() {
+  return (
+    <DiffViewer
+      oldContent={oldCode}
+      newContent={newCode}
+      oldFileName="greet.js"
+      newFileName="greet.ts"
+      language="typescript"
+    />
+  )
+}
+```
+
+## DiffViewerProps
+
+The `DiffViewer` component accepts the following props:
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `oldContent` | `string` | `''` | The original content before changes |
+| `newContent` | `string` | `''` | The modified content after changes |
+| `oldFileName` | `string` | `'Original'` | Display name for the original file |
+| `newFileName` | `string` | `'Modified'` | Display name for the modified file |
+| `viewMode` | `DiffViewMode` | `'unified'` | How to display the diff |
+| `language` | `string` | `'text'` | Language for syntax highlighting |
+| `showLineNumbers` | `boolean` | `true` | Show line numbers in the gutter |
+| `highlightChanges` | `boolean` | `true` | Highlight added/removed text inline |
+| `className` | `string` | `''` | Additional CSS class |
+
+## DiffViewMode
+
+The `DiffViewMode` type controls how the diff is displayed:
+
+```typescript
+type DiffViewMode = 'unified' | 'split'
+```
+
+| Mode | Description |
+|------|-------------|
+| `'unified'` | Shows changes in a single column with additions and deletions interleaved |
+| `'split'` | Shows old content on the left and new content on the right side-by-side |
+
+### Unified View Example
+
+```tsx title="UnifiedDiff.tsx"
+import { DiffViewer } from '@dotdo/terminal'
+
+function UnifiedDiff() {
+  return (
+    <DiffViewer
+      oldContent="const x = 1;\nconst y = 2;"
+      newContent="const x = 1;\nconst y = 2;\nconst z = 3;"
+      viewMode="unified"
+      language="javascript"
+    />
+  )
+}
+```
+
+### Split View Example
+
+```tsx title="SplitDiff.tsx"
+import { DiffViewer } from '@dotdo/terminal'
+
+function SplitDiff() {
+  return (
+    <DiffViewer
+      oldContent="const x = 1;\nconst y = 2;"
+      newContent="const x = 1;\nconst y = 2;\nconst z = 3;"
+      viewMode="split"
+      language="javascript"
+    />
+  )
+}
+```
+
+## Syntax Highlighting
+
+The `DiffViewer` supports syntax highlighting for many programming languages. The `language` prop accepts standard language identifiers:
+
+| Language | Value |
+|----------|-------|
+| TypeScript | `'typescript'` or `'ts'` |
+| JavaScript | `'javascript'` or `'js'` |
+| Python | `'python'` or `'py'` |
+| Rust | `'rust'` or `'rs'` |
+| Go | `'go'` |
+| JSON | `'json'` |
+| YAML | `'yaml'` |
+| Markdown | `'markdown'` or `'md'` |
+| CSS | `'css'` |
+| HTML | `'html'` |
+| Shell | `'bash'` or `'sh'` |
+| Plain Text | `'text'` |
+
+```tsx title="SyntaxHighlighting.tsx"
+import { DiffViewer } from '@dotdo/terminal'
+
+const oldPython = `def hello():
+    print("Hello")`
+
+const newPython = `def hello(name: str) -> None:
+    print(f"Hello, {name}!")`
+
+function PythonDiff() {
+  return (
+    <DiffViewer
+      oldContent={oldPython}
+      newContent={newPython}
+      language="python"
+      oldFileName="hello.py"
+      newFileName="hello.py"
+    />
+  )
+}
+```
+
+## Advanced Usage
+
+### Controlled View Mode
+
+Toggle between view modes dynamically:
+
+```tsx title="ToggleViewMode.tsx"
+import { useState } from 'react'
+import { DiffViewer, DiffViewMode } from '@dotdo/terminal'
+
+function ToggleableDiff() {
+  const [viewMode, setViewMode] = useState<DiffViewMode>('unified')
+
+  return (
+    <div>
+      <div style={{ marginBottom: '8px' }}>
+        <button
+          onClick={() => setViewMode('unified')}
+          disabled={viewMode === 'unified'}
+        >
+          Unified
+        </button>
+        <button
+          onClick={() => setViewMode('split')}
+          disabled={viewMode === 'split'}
+        >
+          Split
+        </button>
+      </div>
+      <DiffViewer
+        oldContent="const a = 1;"
+        newContent="const a = 2;"
+        viewMode={viewMode}
+        language="javascript"
+      />
+    </div>
+  )
+}
+```
+
+### File Comparison with Headers
+
+Display file paths in the diff header:
+
+```tsx title="FileComparison.tsx"
+import { DiffViewer } from '@dotdo/terminal'
+
+function FileComparison() {
+  return (
+    <DiffViewer
+      oldContent={originalFileContent}
+      newContent={modifiedFileContent}
+      oldFileName="src/utils/helpers.ts"
+      newFileName="src/utils/helpers.ts"
+      viewMode="split"
+      language="typescript"
+    />
+  )
+}
+```
+
+### Showing Large Diffs
+
+For large files with many changes, unified view provides better vertical space usage:
+
+```tsx title="LargeDiff.tsx"
+import { DiffViewer } from '@dotdo/terminal'
+
+function LargeDiff({ oldContent, newContent }: { oldContent: string; newContent: string }) {
+  return (
+    <div style={{ height: '600px', overflow: 'auto' }}>
+      <DiffViewer
+        oldContent={oldContent}
+        newContent={newContent}
+        viewMode="unified"
+        language="typescript"
+        showLineNumbers={true}
+      />
+    </div>
+  )
+}
+```
+
+### Disabling Inline Highlighting
+
+For cleaner diffs without character-level highlighting:
+
+```tsx title="NoInlineHighlight.tsx"
+import { DiffViewer } from '@dotdo/terminal'
+
+function CleanDiff() {
+  return (
+    <DiffViewer
+      oldContent="Hello World"
+      newContent="Hello Universe"
+      highlightChanges={false}
+    />
+  )
+}
+```
+
+## Styling
+
+The component uses semantic CSS classes for customization:
+
+| Class | Description |
+|-------|-------------|
+| `.diff-viewer` | Root container |
+| `.diff-header` | File name header section |
+| `.diff-content` | Main diff content area |
+| `.diff-line` | Individual line wrapper |
+| `.diff-line-added` | Added line (green background) |
+| `.diff-line-removed` | Removed line (red background) |
+| `.diff-line-unchanged` | Unchanged context line |
+| `.diff-gutter` | Line number gutter |
+| `.diff-highlight` | Inline character highlight |
+
+### Custom Styling Example
+
+```tsx title="CustomStyled.tsx"
+import { DiffViewer } from '@dotdo/terminal'
+import './custom-diff.css'
+
+function StyledDiff() {
+  return (
+    <DiffViewer
+      oldContent="old code"
+      newContent="new code"
+      className="my-custom-diff"
+    />
+  )
+}
+```
+
+```css title="custom-diff.css"
+.my-custom-diff .diff-line-added {
+  background-color: rgba(46, 160, 67, 0.15);
+}
+
+.my-custom-diff .diff-line-removed {
+  background-color: rgba(248, 81, 73, 0.15);
+}
+```
+
+## Next Steps
+
+- [Terminal Component](/terminal/components/terminal) - Full terminal emulator
+- [Chat Component](/terminal/components/chat) - Conversational interface
+- [Layout Component](/terminal/components/layout) - Arrange components in panels

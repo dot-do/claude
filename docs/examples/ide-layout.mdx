@@ -1,0 +1,406 @@
+---
+title: IDE Layout
+description: A complete IDE-style layout example with file explorer, terminal, session management, and theme support using Claude Code SDK components.
+---
+
+This example demonstrates building a full-featured IDE-style interface by combining multiple Claude Code SDK components. The layout includes a file explorer sidebar, main terminal panel, session management, and theme switching.
+
+## Prerequisites
+
+Install the required packages:
+
+```bash
+npm install @anthropic-ai/claude-code-sdk @anthropic/terminal
+```
+
+## Complete Example
+
+```tsx title="IDELayout.tsx"
+import { useState, useCallback } from 'react'
+import {
+  ThemeProvider,
+  Layout,
+  Terminal,
+  FileTree,
+  SessionPanel,
+  useTheme,
+  type FileNode,
+  type Session,
+} from '@anthropic/terminal'
+
+// Sample file structure
+const initialFiles: FileNode[] = [
+  {
+    name: 'src',
+    path: '/src',
+    type: 'directory',
+    children: [
+      {
+        name: 'components',
+        path: '/src/components',
+        type: 'directory',
+        children: [
+          { name: 'Button.tsx', path: '/src/components/Button.tsx', type: 'file', size: 1240 },
+          { name: 'Input.tsx', path: '/src/components/Input.tsx', type: 'file', size: 892 },
+          { name: 'Modal.tsx', path: '/src/components/Modal.tsx', type: 'file', size: 2150 },
+        ],
+      },
+      { name: 'App.tsx', path: '/src/App.tsx', type: 'file', size: 3420 },
+      { name: 'index.tsx', path: '/src/index.tsx', type: 'file', size: 256 },
+      { name: 'utils.ts', path: '/src/utils.ts', type: 'file', size: 1820 },
+    ],
+  },
+  {
+    name: 'tests',
+    path: '/tests',
+    type: 'directory',
+    children: [
+      { name: 'App.test.tsx', path: '/tests/App.test.tsx', type: 'file', size: 1560 },
+      { name: 'utils.test.ts', path: '/tests/utils.test.ts', type: 'file', size: 980 },
+    ],
+  },
+  { name: 'package.json', path: '/package.json', type: 'file', size: 1024 },
+  { name: 'tsconfig.json', path: '/tsconfig.json', type: 'file', size: 512 },
+  { name: 'README.md', path: '/README.md', type: 'file', size: 2048 },
+]
+
+// Initial sessions
+const initialSessions: Session[] = [
+  { id: 'main', name: 'Main Terminal', status: 'active' },
+  { id: 'build', name: 'Build Process', status: 'idle' },
+]
+
+function ThemeToggleButton() {
+  const { theme, toggle } = useTheme()
+
+  return (
+    <button
+      onClick={toggle}
+      className="px-3 py-1.5 text-sm rounded-md bg-slate-200 dark:bg-slate-700
+                 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+      aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+    >
+      {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+    </button>
+  )
+}
+
+function Header({
+  sessions,
+  activeSessionId,
+  onSessionSelect,
+  onSessionCreate,
+  onSessionDelete,
+}: {
+  sessions: Session[]
+  activeSessionId: string
+  onSessionSelect: (id: string) => void
+  onSessionCreate: () => void
+  onSessionDelete: (id: string) => void
+}) {
+  return (
+    <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-slate-700">
+      <div className="flex items-center gap-4">
+        <h1 className="text-lg font-semibold text-slate-900 dark:text-white">
+          Claude IDE
+        </h1>
+        <SessionPanel
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelect={onSessionSelect}
+          onCreate={onSessionCreate}
+          onDelete={onSessionDelete}
+        />
+      </div>
+      <ThemeToggleButton />
+    </div>
+  )
+}
+
+function Sidebar({
+  files,
+  selectedPath,
+  onFileSelect,
+}: {
+  files: FileNode[]
+  selectedPath?: string
+  onFileSelect: (file: FileNode) => void
+}) {
+  return (
+    <div className="h-full flex flex-col">
+      <div className="px-3 py-2 text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+        Explorer
+      </div>
+      <div className="flex-1 overflow-auto">
+        <FileTree
+          files={files}
+          selectedPath={selectedPath}
+          onSelect={onFileSelect}
+          showSize
+        />
+      </div>
+    </div>
+  )
+}
+
+function MainContent({
+  activeSessionId,
+  wsBaseUrl,
+}: {
+  activeSessionId: string
+  wsBaseUrl: string
+}) {
+  const { theme } = useTheme()
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700">
+        Terminal - {activeSessionId}
+      </div>
+      <div className="flex-1">
+        <Terminal
+          wsUrl={`${wsBaseUrl}/sessions/${activeSessionId}`}
+          theme={theme === 'dark' ? 'dark' : 'light'}
+          fontSize={14}
+          autoFocus
+          onConnect={() => console.log(`Connected to session: ${activeSessionId}`)}
+          onDisconnect={() => console.log(`Disconnected from session: ${activeSessionId}`)}
+        />
+      </div>
+    </div>
+  )
+}
+
+function BottomPanel() {
+  const [logs] = useState<string[]>([
+    '[12:00:01] Build started...',
+    '[12:00:03] Compiling TypeScript...',
+    '[12:00:05] Build completed successfully',
+    '[12:00:06] Watching for file changes...',
+  ])
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+        <span>Output</span>
+        <button className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+          Clear
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto p-2 font-mono text-xs text-slate-600 dark:text-slate-300">
+        {logs.map((log, index) => (
+          <div key={index} className="py-0.5">
+            {log}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function IDELayoutInner() {
+  const [sessions, setSessions] = useState<Session[]>(initialSessions)
+  const [activeSessionId, setActiveSessionId] = useState('main')
+  const [selectedFilePath, setSelectedFilePath] = useState<string>()
+  const [showSidebar, setShowSidebar] = useState(true)
+  const [showBottom, setShowBottom] = useState(true)
+
+  const wsBaseUrl = 'wss://your-terminal-server.com'
+
+  const handleSessionCreate = useCallback(() => {
+    const newId = `session-${Date.now()}`
+    const newSession: Session = {
+      id: newId,
+      name: `Session ${sessions.length + 1}`,
+      status: 'idle',
+    }
+    setSessions((prev) => [...prev, newSession])
+    setActiveSessionId(newId)
+  }, [sessions.length])
+
+  const handleSessionDelete = useCallback((id: string) => {
+    setSessions((prev) => prev.filter((s) => s.id !== id))
+    if (activeSessionId === id) {
+      setActiveSessionId(sessions[0]?.id ?? 'main')
+    }
+  }, [activeSessionId, sessions])
+
+  const handleSessionSelect = useCallback((id: string) => {
+    setActiveSessionId(id)
+    setSessions((prev) =>
+      prev.map((s) => ({
+        ...s,
+        status: s.id === id ? 'active' : s.status === 'active' ? 'idle' : s.status,
+      }))
+    )
+  }, [])
+
+  const handleFileSelect = useCallback((file: FileNode) => {
+    if (file.type === 'file') {
+      setSelectedFilePath(file.path)
+      console.log('Opening file:', file.path)
+    }
+  }, [])
+
+  return (
+    <div className="h-screen bg-white dark:bg-slate-900">
+      <Layout
+        header={
+          <Header
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            onSessionSelect={handleSessionSelect}
+            onSessionCreate={handleSessionCreate}
+            onSessionDelete={handleSessionDelete}
+          />
+        }
+        sidebar={
+          <Sidebar
+            files={initialFiles}
+            selectedPath={selectedFilePath}
+            onFileSelect={handleFileSelect}
+          />
+        }
+        main={
+          <MainContent
+            activeSessionId={activeSessionId}
+            wsBaseUrl={wsBaseUrl}
+          />
+        }
+        bottom={<BottomPanel />}
+        sidebarWidth={260}
+        bottomHeight={150}
+        minSidebarWidth={200}
+        maxSidebarWidth={400}
+        minBottomHeight={100}
+        maxBottomHeight={300}
+        showSidebar={showSidebar}
+        showBottom={showBottom}
+      />
+    </div>
+  )
+}
+
+export default function IDELayout() {
+  return (
+    <ThemeProvider defaultMode="system" storageKey="ide-theme">
+      <IDELayoutInner />
+    </ThemeProvider>
+  )
+}
+```
+
+## Key Features
+
+### Theme Integration
+
+The `ThemeProvider` wraps the entire application, enabling consistent theming across all components:
+
+- Automatic system preference detection with `defaultMode="system"`
+- Theme persistence via localStorage with custom `storageKey`
+- Theme toggle accessible from the header
+
+### Resizable Panels
+
+The `Layout` component provides draggable resize handles:
+
+- Sidebar can be resized between 200px and 400px
+- Bottom panel can be resized between 100px and 300px
+- Panels can be toggled on/off programmatically
+
+### Session Management
+
+Multiple terminal sessions with visual status indicators:
+
+- Active sessions show a green indicator
+- Idle sessions show a yellow indicator
+- Create and delete sessions dynamically
+- Switch between sessions seamlessly
+
+### File Explorer
+
+Hierarchical file browser with:
+
+- Directory expansion/collapse
+- File icons colored by extension
+- File size display
+- Selection highlighting
+
+## Customization
+
+### Adding Keyboard Shortcuts
+
+```tsx title="KeyboardShortcuts.tsx"
+import { useEffect } from 'react'
+import { useTheme } from '@anthropic/terminal'
+
+function useKeyboardShortcuts({
+  onToggleSidebar,
+  onToggleBottom,
+}: {
+  onToggleSidebar: () => void
+  onToggleBottom: () => void
+}) {
+  const { toggle: toggleTheme } = useTheme()
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey) {
+        switch (e.key) {
+          case 'b':
+            e.preventDefault()
+            onToggleSidebar()
+            break
+          case 'j':
+            e.preventDefault()
+            onToggleBottom()
+            break
+          case 'k':
+            if (e.shiftKey) {
+              e.preventDefault()
+              toggleTheme()
+            }
+            break
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onToggleSidebar, onToggleBottom, toggleTheme])
+}
+```
+
+### Custom Status Bar
+
+```tsx title="StatusBar.tsx"
+function StatusBar({
+  activeSession,
+  selectedFile,
+}: {
+  activeSession: Session
+  selectedFile?: string
+}) {
+  return (
+    <div className="flex items-center justify-between px-4 py-1 text-xs
+                    bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+      <div className="flex items-center gap-4">
+        <span>Session: {activeSession.name}</span>
+        {selectedFile && <span>File: {selectedFile}</span>}
+      </div>
+      <div className="flex items-center gap-4">
+        <span>UTF-8</span>
+        <span>TypeScript React</span>
+      </div>
+    </div>
+  )
+}
+```
+
+## Next Steps
+
+- [Layout Component](/terminal/components/layout) - Learn more about panel configuration
+- [Terminal Component](/terminal/components/terminal) - Terminal customization options
+- [FileTree Component](/terminal/components/filetree) - File browser features
+- [SessionPanel Component](/terminal/components/session-panel) - Session management
+- [Theme System](/terminal/themes) - Theme customization

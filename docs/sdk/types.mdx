@@ -1,0 +1,623 @@
+---
+title: SDK Types
+description: Complete type definitions for the Claude Code SDK including messages, sessions, options, and type guards.
+---
+
+The SDK provides comprehensive TypeScript types for working with Claude Code messages, sessions, and configuration. All types are exported from the main package and can be imported directly.
+
+```typescript
+import type {
+  SDKMessage,
+  SDKAssistantMessage,
+  SDKUserMessage,
+  SDKResultMessage,
+  SDKSystemMessage,
+  ClaudeSession,
+  ClaudeCodeOptions,
+  SessionStatus,
+  ContentBlock,
+  TextBlock,
+  ToolUseBlock,
+  ToolResultBlock,
+} from '@anthropic-ai/claude-code-sdk'
+```
+
+## Message Types
+
+The SDK uses a discriminated union pattern for messages, with each message type having a unique `type` field.
+
+### SDKMessage
+
+The union type representing all possible messages from the Claude Code CLI.
+
+```typescript
+type SDKMessage =
+  | SDKAssistantMessage
+  | SDKUserMessage
+  | SDKSystemMessage
+  | SDKResultMessage
+  | SDKPartialMessage
+```
+
+### SDKAssistantMessage
+
+Messages from Claude containing text responses or tool use requests.
+
+```typescript
+interface SDKAssistantMessage {
+  type: 'assistant'
+  uuid: string
+  session_id: string
+  message: {
+    role: 'assistant'
+    content: Array<TextBlock | ToolUseBlock>
+  }
+  parent_tool_use_id: string | null
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `type` | `'assistant'` | Discriminator for assistant messages |
+| `uuid` | `string` | Unique identifier for this message |
+| `session_id` | `string` | Session this message belongs to |
+| `message.role` | `'assistant'` | Message role identifier |
+| `message.content` | `Array<TextBlock \| ToolUseBlock>` | Content blocks (text or tool calls) |
+| `parent_tool_use_id` | `string \| null` | Parent tool use if this is a nested response |
+
+### SDKUserMessage
+
+User input messages or tool results.
+
+```typescript
+interface SDKUserMessage {
+  type: 'user'
+  uuid?: string
+  session_id: string
+  message: {
+    role: 'user'
+    content: string | Array<TextBlock | ToolResultBlock | ImageBlock>
+  }
+  parent_tool_use_id: string | null
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `type` | `'user'` | Discriminator for user messages |
+| `uuid` | `string \| undefined` | Optional unique identifier |
+| `session_id` | `string` | Session this message belongs to |
+| `message.content` | `string \| Array<...>` | Text string or array of content blocks |
+| `parent_tool_use_id` | `string \| null` | Parent tool use if this is a tool result |
+
+### SDKResultMessage
+
+Sent at the end of a query with completion status and usage statistics.
+
+```typescript
+interface SDKResultMessage {
+  type: 'result'
+  subtype: ResultSubtype
+  uuid: string
+  session_id: string
+  duration_ms: number
+  duration_api_ms: number
+  is_error: boolean
+  num_turns: number
+  total_cost_usd: number
+  usage: {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  }
+  // Success-specific fields
+  result?: string
+  structured_output?: unknown
+  // Error-specific fields
+  errors?: string[]
+  permission_denials?: Array<{
+    tool_name: string
+    tool_use_id: string
+    tool_input: unknown
+  }>
+  modelUsage?: Record<string, ModelUsage>
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `type` | `'result'` | Discriminator for result messages |
+| `subtype` | `ResultSubtype` | Result status (success, error types) |
+| `duration_ms` | `number` | Total duration in milliseconds |
+| `duration_api_ms` | `number` | Time spent in API calls |
+| `is_error` | `boolean` | Whether the query ended in error |
+| `num_turns` | `number` | Number of conversation turns |
+| `total_cost_usd` | `number` | Total API cost in USD |
+| `usage` | `object` | Token usage statistics |
+| `result` | `string \| undefined` | Final result text (on success) |
+| `errors` | `string[] \| undefined` | Error messages (on failure) |
+
+#### ResultSubtype
+
+```typescript
+type ResultSubtype =
+  | 'success'
+  | 'error_max_turns'
+  | 'error_during_execution'
+  | 'error_max_budget_usd'
+  | 'error_max_structured_output_retries'
+```
+
+### SDKSystemMessage
+
+System messages for session initialization and state changes.
+
+```typescript
+type SDKSystemMessage = SDKSystemInitMessage | SDKSystemCompactMessage
+```
+
+#### SDKSystemInitMessage
+
+Sent at the start of a session with configuration details.
+
+```typescript
+interface SDKSystemInitMessage {
+  type: 'system'
+  subtype: 'init'
+  uuid: string
+  session_id: string
+  apiKeySource?: string
+  cwd: string
+  tools: string[]
+  mcp_servers?: Array<{ name: string; status: string }>
+  model: string
+  permissionMode: string
+  slash_commands?: string[]
+  output_style?: string
+}
+```
+
+#### SDKSystemCompactMessage
+
+Sent when context compaction occurs.
+
+```typescript
+interface SDKSystemCompactMessage {
+  type: 'system'
+  subtype: 'compact_boundary'
+  uuid: string
+  session_id: string
+  compact_metadata: {
+    trigger: 'manual' | 'auto'
+    pre_tokens: number
+  }
+}
+```
+
+## Content Block Types
+
+Content blocks represent the individual pieces of content within messages.
+
+### ContentBlock
+
+Union type for all content block types.
+
+```typescript
+type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ImageBlock
+```
+
+### TextBlock
+
+Plain text content.
+
+```typescript
+interface TextBlock {
+  type: 'text'
+  text: string
+}
+```
+
+**Example:**
+
+```typescript
+const textBlock: TextBlock = {
+  type: 'text',
+  text: 'Here is the analysis of your code...',
+}
+```
+
+### ToolUseBlock
+
+Represents a tool invocation by Claude.
+
+```typescript
+interface ToolUseBlock {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: unknown
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `type` | `'tool_use'` | Discriminator for tool use blocks |
+| `id` | `string` | Unique identifier for this tool use |
+| `name` | `string` | Name of the tool being invoked |
+| `input` | `unknown` | Tool-specific input parameters |
+
+**Example:**
+
+```typescript
+const toolUse: ToolUseBlock = {
+  type: 'tool_use',
+  id: 'toolu_01abc123',
+  name: 'Read',
+  input: {
+    file_path: '/path/to/file.ts',
+  },
+}
+```
+
+### ToolResultBlock
+
+Result of a tool execution.
+
+```typescript
+interface ToolResultBlock {
+  type: 'tool_result'
+  tool_use_id: string
+  content: unknown
+  is_error?: boolean
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `type` | `'tool_result'` | Discriminator for tool result blocks |
+| `tool_use_id` | `string` | ID of the corresponding tool use |
+| `content` | `unknown` | Tool execution result |
+| `is_error` | `boolean \| undefined` | Whether the tool execution failed |
+
+## Session Types
+
+### ClaudeSession
+
+Represents the state of a Claude Code session.
+
+```typescript
+interface ClaudeSession {
+  id: string
+  status: SessionStatus
+  createdAt: string
+  lastActivityAt: string
+
+  // Configuration
+  cwd: string
+  model?: string
+  systemPrompt?: SystemPromptConfig
+  tools?: ToolsConfig
+  permissionMode: PermissionMode
+  maxTurns?: number
+
+  // MCP servers
+  mcpServers?: Array<{
+    name: string
+    config: McpServerConfig
+    status?: 'connected' | 'failed' | 'needs-auth' | 'pending'
+  }>
+
+  // Runtime state
+  turnCount: number
+  totalCostUsd: number
+  usage: {
+    inputTokens: number
+    outputTokens: number
+  }
+
+  // CLI session ID (for --resume)
+  cliSessionId?: string
+
+  // Environment (not serialized to storage)
+  env?: Record<string, string>
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | `string` | Unique session identifier |
+| `status` | `SessionStatus` | Current session status |
+| `createdAt` | `string` | ISO timestamp of creation |
+| `lastActivityAt` | `string` | ISO timestamp of last activity |
+| `cwd` | `string` | Working directory for the session |
+| `model` | `string \| undefined` | Model being used |
+| `permissionMode` | `PermissionMode` | Permission handling mode |
+| `turnCount` | `number` | Number of turns completed |
+| `totalCostUsd` | `number` | Accumulated API cost |
+| `usage` | `object` | Token usage statistics |
+
+### SessionStatus
+
+```typescript
+type SessionStatus = 'active' | 'completed' | 'error' | 'interrupted'
+```
+
+| Status | Description |
+|--------|-------------|
+| `active` | Session is running and accepting input |
+| `completed` | Session finished successfully |
+| `error` | Session ended due to an error |
+| `interrupted` | Session was manually interrupted |
+
+## Configuration Types
+
+### ClaudeCodeOptions
+
+Configuration options for creating a Claude Code session.
+
+```typescript
+interface ClaudeCodeOptions {
+  // API configuration
+  apiKey?: string
+  model?: string
+  fallbackModel?: string
+
+  // Session options
+  cwd?: string
+  env?: Record<string, string>
+
+  // Behavior configuration
+  systemPrompt?: SystemPromptConfig
+  tools?: ToolsConfig
+  allowedTools?: string[]
+  disallowedTools?: string[]
+
+  // Permissions
+  permissionMode?: PermissionMode
+  allowDangerouslySkipPermissions?: boolean
+
+  // Limits
+  maxTurns?: number
+  maxBudgetUsd?: number
+  maxThinkingTokens?: number
+
+  // MCP servers
+  mcpServers?: Record<string, McpServerConfig>
+
+  // Sandbox configuration
+  sleepAfter?: number
+  keepAlive?: boolean
+
+  // Streaming options
+  includePartialMessages?: boolean
+
+  // Session management
+  resume?: string
+  continue?: boolean
+  forkSession?: boolean
+}
+```
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `apiKey` | `string` | Environment | Anthropic API key |
+| `model` | `string` | `'claude-sonnet-4-20250514'` | Model to use |
+| `cwd` | `string` | `process.cwd()` | Working directory |
+| `permissionMode` | `PermissionMode` | `'default'` | Permission handling |
+| `maxTurns` | `number` | Unlimited | Maximum conversation turns |
+| `maxBudgetUsd` | `number` | Unlimited | Maximum API cost |
+| `includePartialMessages` | `boolean` | `false` | Enable streaming events |
+| `resume` | `string` | - | Resume existing session by ID |
+
+### PermissionMode
+
+```typescript
+type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
+```
+
+| Mode | Description |
+|------|-------------|
+| `default` | Ask for permission on sensitive operations |
+| `acceptEdits` | Automatically accept file edits |
+| `bypassPermissions` | Skip all permission prompts |
+| `plan` | Planning mode without execution |
+
+### MCP Server Configuration
+
+```typescript
+interface McpServerStdioConfig {
+  type?: 'stdio'
+  command: string
+  args?: string[]
+  env?: Record<string, string>
+}
+
+interface McpServerSseConfig {
+  type: 'sse'
+  url: string
+  headers?: Record<string, string>
+}
+
+interface McpServerHttpConfig {
+  type: 'http'
+  url: string
+  headers?: Record<string, string>
+}
+
+type McpServerConfig = McpServerStdioConfig | McpServerSseConfig | McpServerHttpConfig
+```
+
+## Type Guards
+
+The SDK provides type guard functions for safe type narrowing at runtime.
+
+### Message Type Guards
+
+```typescript
+import {
+  isAssistantMessage,
+  isUserMessage,
+  isResultMessage,
+  isSystemMessage,
+  isPartialMessage,
+} from '@anthropic-ai/claude-code-sdk'
+```
+
+#### isAssistantMessage
+
+```typescript
+function isAssistantMessage(msg: SDKMessage): msg is SDKAssistantMessage
+```
+
+Check if a message is from the assistant.
+
+```typescript
+for await (const message of session) {
+  if (isAssistantMessage(message)) {
+    // TypeScript knows message is SDKAssistantMessage
+    for (const block of message.message.content) {
+      if (isTextBlock(block)) {
+        console.log(block.text)
+      }
+    }
+  }
+}
+```
+
+#### isUserMessage
+
+```typescript
+function isUserMessage(msg: SDKMessage): msg is SDKUserMessage
+```
+
+Check if a message is from the user or contains tool results.
+
+#### isResultMessage
+
+```typescript
+function isResultMessage(msg: SDKMessage): msg is SDKResultMessage
+```
+
+Check if a message is a result message indicating query completion.
+
+```typescript
+for await (const message of session) {
+  if (isResultMessage(message)) {
+    console.log(`Completed in ${message.duration_ms}ms`)
+    console.log(`Cost: $${message.total_cost_usd.toFixed(4)}`)
+    if (message.is_error) {
+      console.error('Errors:', message.errors)
+    }
+  }
+}
+```
+
+### Content Block Type Guards
+
+```typescript
+import {
+  isTextBlock,
+  isToolUseBlock,
+  isToolResultBlock,
+} from '@anthropic-ai/claude-code-sdk'
+```
+
+#### isTextBlock
+
+```typescript
+function isTextBlock(block: ContentBlock): block is TextBlock
+```
+
+Check if a content block is a text block.
+
+```typescript
+function extractText(message: SDKAssistantMessage): string {
+  return message.message.content
+    .filter(isTextBlock)
+    .map((block) => block.text)
+    .join('\n')
+}
+```
+
+#### isToolUseBlock
+
+```typescript
+function isToolUseBlock(block: ContentBlock): block is ToolUseBlock
+```
+
+Check if a content block is a tool use block.
+
+```typescript
+function getToolCalls(message: SDKAssistantMessage): ToolUseBlock[] {
+  return message.message.content.filter(isToolUseBlock)
+}
+```
+
+## Usage Statistics
+
+### ModelUsage
+
+```typescript
+interface ModelUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadInputTokens: number
+  cacheCreationInputTokens: number
+  webSearchRequests: number
+  costUSD: number
+  contextWindow: number
+}
+```
+
+Available in `SDKResultMessage.modelUsage` keyed by model name.
+
+## Complete Example
+
+```typescript
+import {
+  ClaudeCode,
+  type SDKMessage,
+  type ClaudeCodeOptions,
+  type ClaudeSession,
+  isAssistantMessage,
+  isResultMessage,
+  isTextBlock,
+  isToolUseBlock,
+} from '@anthropic-ai/claude-code-sdk'
+
+const options: ClaudeCodeOptions = {
+  model: 'claude-sonnet-4-20250514',
+  maxTurns: 10,
+  maxBudgetUsd: 1.0,
+  permissionMode: 'acceptEdits',
+}
+
+async function processMessages(session: AsyncIterable<SDKMessage>) {
+  for await (const message of session) {
+    if (isAssistantMessage(message)) {
+      for (const block of message.message.content) {
+        if (isTextBlock(block)) {
+          process.stdout.write(block.text)
+        } else if (isToolUseBlock(block)) {
+          console.log(`\nUsing tool: ${block.name}`)
+        }
+      }
+    } else if (isResultMessage(message)) {
+      console.log('\n---')
+      console.log(`Turns: ${message.num_turns}`)
+      console.log(`Duration: ${message.duration_ms}ms`)
+      console.log(`Cost: $${message.total_cost_usd.toFixed(4)}`)
+    }
+  }
+}
+
+const session = ClaudeCode.query('Analyze this codebase', options)
+await processMessages(session)
+```
+
+## Related
+
+- [SDK Overview](/sdk) - Getting started with the SDK
+- [Client Reference](/sdk/client) - Client API documentation
+- [Server Reference](/sdk/server) - Server-side implementation

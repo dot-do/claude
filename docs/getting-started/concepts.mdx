@@ -1,0 +1,313 @@
+---
+title: Core Concepts
+description: Understanding sessions, RPC communication, event streaming, and the durable architecture that powers claude.contact
+---
+
+This guide explains the fundamental building blocks of the claude.contact platform. Understanding these concepts will help you build more effective integrations and debug issues when they arise.
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              Client                                      │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
+│  │   Browser App   │  │    SDK Client   │  │     CLI / Terminal      │  │
+│  └────────┬────────┘  └────────┬────────┘  └────────────┬────────────┘  │
+│           │                    │                        │               │
+│           └────────────────────┼────────────────────────┘               │
+│                                │                                        │
+│                         WebSocket / RPC                                 │
+└────────────────────────────────┼────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Cloudflare Edge                                  │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                      Durable Object                              │    │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │    │
+│  │  │   Session   │  │  RPC Layer  │  │    Event Broadcaster    │  │    │
+│  │  │   State     │  │  (capnweb)  │  │    (NDJSON Stream)      │  │    │
+│  │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                │                                        │
+│                                ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │                    Claude Code Process                           │    │
+│  │         (Spawned subprocess per session)                         │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+## Sessions
+
+A **session** represents a single, persistent conversation with Claude Code. Each session maintains its own state, conversation history, and workspace context.
+
+### Session Lifecycle
+
+1. **Creation**: A new session is initialized with a unique ID and optional configuration
+2. **Active**: The session processes messages and streams responses
+3. **Idle**: The session remains available but awaits new input
+4. **Terminated**: The session is explicitly closed or times out
+
+### Session Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `sessionId` | `string` | Unique identifier for the session |
+| `workingDirectory` | `string` | Filesystem context for the session |
+| `model` | `string` | Claude model being used |
+| `status` | `SessionStatus` | Current state of the session |
+
+```typescript
+import { createClient } from '@anthropic/claude-code-sdk';
+
+const client = createClient({
+  baseUrl: 'https://your-instance.claude.contact',
+});
+
+// Create a new session
+const session = await client.createSession({
+  workingDirectory: '/path/to/project',
+});
+
+console.log('Session ID:', session.sessionId);
+```
+
+<Callout type="info">
+  Sessions are automatically persisted by Durable Objects, allowing reconnection after network interruptions without losing conversation context.
+</Callout>
+
+## RPC (capnweb)
+
+The platform uses **capnweb**, a capability-based RPC protocol built on WebSockets, for bidirectional communication between clients and the server.
+
+### Why capnweb?
+
+- **Bidirectional**: Both client and server can initiate calls
+- **Streaming**: Native support for streaming responses
+- **Type-safe**: Full TypeScript integration with generated types
+- **Capability-based**: Fine-grained permission control
+
+### Message Format
+
+RPC messages are serialized as JSON with a consistent structure:
+
+```typescript
+interface RpcMessage {
+  id: string;           // Unique message identifier
+  method: string;       // RPC method name
+  params?: unknown;     // Method parameters
+  result?: unknown;     // Response data (for replies)
+  error?: RpcError;     // Error information (if failed)
+}
+```
+
+### Making RPC Calls
+
+```typescript
+// The SDK abstracts RPC details, but you can access the raw interface
+const response = await client.rpc.call('session.sendMessage', {
+  sessionId: session.sessionId,
+  content: 'Explain this codebase',
+});
+```
+
+### Connection Handling
+
+The RPC layer automatically handles:
+
+- **Reconnection**: Automatic retry with exponential backoff
+- **Heartbeats**: Keep-alive pings to detect connection issues
+- **Message ordering**: Guaranteed delivery order for dependent operations
+
+```typescript
+client.on('disconnect', () => {
+  console.log('Connection lost, attempting reconnect...');
+});
+
+client.on('reconnect', () => {
+  console.log('Connection restored');
+});
+```
+
+## Event Streaming
+
+Claude Code responses are streamed as **events** using NDJSON (Newline-Delimited JSON). This enables real-time display of assistant responses, tool usage, and status updates.
+
+### Event Types
+
+| Event Type | Description |
+|------------|-------------|
+| `message_start` | Beginning of a new assistant message |
+| `content_block_start` | Start of a content block (text, tool use, etc.) |
+| `content_block_delta` | Incremental content update |
+| `content_block_stop` | End of a content block |
+| `message_delta` | Message-level updates (token counts, stop reason) |
+| `message_stop` | Complete end of message |
+| `tool_use` | Claude is invoking a tool |
+| `tool_result` | Result from tool execution |
+
+### Consuming Events
+
+```typescript
+const stream = await client.sendMessage(sessionId, {
+  content: 'Refactor this function for better performance',
+});
+
+for await (const event of stream) {
+  switch (event.type) {
+    case 'content_block_delta':
+      if (event.delta.type === 'text_delta') {
+        process.stdout.write(event.delta.text);
+      }
+      break;
+
+    case 'tool_use':
+      console.log(`\nUsing tool: ${event.name}`);
+      break;
+
+    case 'message_stop':
+      console.log('\n--- Message complete ---');
+      break;
+  }
+}
+```
+
+### Event Flow Diagram
+
+```
+Client                          Server                          Claude
+  │                               │                               │
+  │──── sendMessage ──────────────▶                               │
+  │                               │──── prompt ──────────────────▶│
+  │                               │                               │
+  │◀──── message_start ───────────│◀──── stream start ───────────│
+  │◀──── content_block_start ─────│                               │
+  │◀──── content_block_delta ─────│◀──── token ──────────────────│
+  │◀──── content_block_delta ─────│◀──── token ──────────────────│
+  │◀──── content_block_delta ─────│◀──── token ──────────────────│
+  │◀──── content_block_stop ──────│                               │
+  │◀──── message_stop ────────────│◀──── stream end ─────────────│
+  │                               │                               │
+```
+
+## Durable Objects
+
+**Durable Objects** are Cloudflare's stateful compute primitive that powers session persistence and real-time coordination.
+
+### How Durable Objects Work
+
+Each session maps to a single Durable Object instance that:
+
+1. **Maintains State**: Stores conversation history and session configuration
+2. **Handles Connections**: Manages WebSocket connections from clients
+3. **Coordinates Access**: Ensures single-writer consistency for session state
+4. **Spawns Processes**: Manages the Claude Code subprocess
+
+### Geographic Affinity
+
+Durable Objects are created close to the first request and stay in that region:
+
+```typescript
+// First connection from Tokyo creates the DO in Asia
+const session = await client.createSession();
+
+// Subsequent connections route to the same DO
+// Even from other regions (with slight latency increase)
+```
+
+<Callout type="warning">
+  For lowest latency, initialize sessions from the geographic region where most interactions will occur.
+</Callout>
+
+### State Persistence
+
+Session state is automatically persisted:
+
+```typescript
+// State survives disconnections
+await client.disconnect();
+
+// Reconnect to the same session
+await client.connect();
+const history = await client.getSessionHistory(sessionId);
+// Previous conversation is intact
+```
+
+## Client-Server Connection Flow
+
+Understanding the full connection flow helps with debugging and optimization:
+
+### 1. Initial Connection
+
+```
+1. Client initiates WebSocket to edge
+2. Edge routes to appropriate Durable Object
+3. DO accepts connection and sends handshake
+4. Client sends authentication
+5. DO validates and confirms session
+```
+
+### 2. Message Exchange
+
+```
+1. Client sends message via RPC
+2. DO queues message and spawns/resumes Claude Code process
+3. Claude Code processes message
+4. DO streams events back to client via WebSocket
+5. Client acknowledges receipt
+```
+
+### 3. Graceful Disconnection
+
+```
+1. Client sends disconnect signal
+2. DO flushes pending events
+3. DO persists final state
+4. WebSocket closes cleanly
+```
+
+## Putting It Together
+
+Here is a complete example demonstrating all core concepts:
+
+```typescript
+import { createClient } from '@anthropic/claude-code-sdk';
+
+async function main() {
+  // Create client (establishes RPC connection)
+  const client = createClient({
+    baseUrl: 'https://api.claude.contact',
+    apiKey: process.env.CLAUDE_API_KEY,
+  });
+
+  // Create session (allocates Durable Object)
+  const session = await client.createSession({
+    workingDirectory: process.cwd(),
+  });
+
+  console.log(`Session created: ${session.sessionId}`);
+
+  // Send message and consume event stream
+  const stream = await client.sendMessage(session.sessionId, {
+    content: 'What files are in this directory?',
+  });
+
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+      process.stdout.write(event.delta.text);
+    }
+  }
+
+  // Session persists even after disconnect
+  await client.disconnect();
+}
+
+main().catch(console.error);
+```
+
+## Next Steps
+
+- [Installation](/getting-started/installation) - Set up the SDK in your project
+- [Quick Start](/getting-started/quick-start) - Build your first integration
+- [SDK Reference](/sdk) - Complete API documentation

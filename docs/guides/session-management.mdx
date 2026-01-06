@@ -1,0 +1,595 @@
+---
+title: Session Management
+description: Learn how to create, persist, resume, and manage Claude Code sessions for stateful AI-powered applications
+---
+
+Sessions are the foundation of stateful interactions with Claude Code. A session maintains conversation context, working directory state, and tool execution history across multiple queries. This guide covers the complete session lifecycle and best practices for production applications.
+
+## Session Lifecycle
+
+Every session follows a predictable lifecycle: creation, active use, and eventual destruction. Understanding this lifecycle helps you design applications that efficiently manage resources.
+
+### Creating Sessions
+
+Create a new session with `createSession`. Each session gets a unique identifier and maintains isolated state.
+
+```typescript title="create-session.ts"
+import { createClaudeClient } from '@anthropic/claude-sdk';
+
+const client = createClaudeClient({
+  serverUrl: 'ws://localhost:3000',
+  apiKey: process.env.CLAUDE_API_KEY,
+});
+
+await client.connect();
+
+// Create a basic session
+const session = await client.createSession({
+  model: 'claude-sonnet-4-20250514',
+});
+
+console.log('Session ID:', session.id);
+console.log('Created at:', session.createdAt);
+```
+
+Configure sessions with specific capabilities for your use case:
+
+```typescript title="configured-session.ts"
+const session = await client.createSession({
+  model: 'claude-opus-4-5-20250101',
+  systemPrompt: 'You are a senior TypeScript developer. Write clean, well-documented code.',
+  workingDirectory: '/path/to/project',
+  environment: {
+    NODE_ENV: 'development',
+    DEBUG: 'true',
+  },
+  maxTokens: 8192,
+});
+```
+
+### Using Sessions
+
+Once created, send messages to a session using `sendMessage` for streaming or `query` for complete responses.
+
+```typescript title="using-sessions.ts"
+// Stream responses for real-time output
+const events = client.sendMessage(session.id, 'Refactor the authentication module');
+
+for await (const event of events) {
+  if (event.type === 'text') {
+    process.stdout.write(event.content);
+  } else if (event.type === 'tool_use') {
+    console.log(`\nExecuting: ${event.name}`);
+  }
+}
+
+// Or wait for complete response
+const response = await client.query(session.id, 'What changes did you make?');
+console.log(response.content);
+```
+
+Sessions maintain conversation context automatically. Follow-up questions reference previous interactions:
+
+```typescript title="conversation-context.ts"
+await client.query(session.id, 'Create a User interface with name and email');
+// Claude creates the interface
+
+await client.query(session.id, 'Add an optional phone field');
+// Claude understands which interface to modify
+
+await client.query(session.id, 'Now create a validation function for it');
+// Claude knows to validate the User interface
+```
+
+### Destroying Sessions
+
+Always destroy sessions when finished to free resources. This terminates any running processes and cleans up state.
+
+```typescript title="destroy-session.ts"
+await client.destroySession(session.id);
+console.log('Session destroyed');
+```
+
+For guaranteed cleanup, use try/finally:
+
+```typescript title="cleanup-pattern.ts"
+const session = await client.createSession({ model: 'claude-sonnet-4-20250514' });
+
+try {
+  await client.query(session.id, 'Build a REST API');
+  await client.query(session.id, 'Add error handling');
+} finally {
+  await client.destroySession(session.id);
+}
+```
+
+## Session Persistence
+
+By default, sessions exist only in memory. For production applications, enable persistence to survive server restarts and support session resumption.
+
+### Server-Side Persistence
+
+The ClaudeCode Durable Object automatically persists sessions to Cloudflare's storage:
+
+```typescript title="wrangler.toml"
+[[durable_objects.bindings]]
+name = "CLAUDE_CODE"
+class_name = "ClaudeCode"
+
+[durable_objects]
+# Sessions persist automatically via Durable Object storage
+```
+
+Configure additional storage backends for message history:
+
+```typescript title="persistence-config.ts"
+// In your worker configuration
+export interface Env {
+  CLAUDE_CODE: DurableObjectNamespace;
+  SESSION_STORAGE: KVNamespace;      // Session metadata
+  MESSAGE_BUFFER: R2Bucket;          // Large message history
+}
+```
+
+### Client-Side Session Storage
+
+Store session IDs client-side to enable resumption across page reloads:
+
+```typescript title="client-storage.ts"
+// Save session ID after creation
+const session = await client.createSession({ model: 'claude-sonnet-4-20250514' });
+localStorage.setItem('claude_session_id', session.id);
+
+// Retrieve on page load
+const savedSessionId = localStorage.getItem('claude_session_id');
+if (savedSessionId) {
+  try {
+    const session = await client.resumeSession(savedSessionId);
+    console.log('Resumed session:', session.id);
+  } catch (error) {
+    // Session expired or invalid, create new one
+    localStorage.removeItem('claude_session_id');
+  }
+}
+```
+
+## TTL and Cleanup
+
+Sessions consume resources. Configure automatic cleanup to prevent resource exhaustion.
+
+### Session TTL Configuration
+
+Set time-to-live when creating sessions:
+
+```typescript title="ttl-config.ts"
+const session = await client.createSession({
+  model: 'claude-sonnet-4-20250514',
+  ttl: 3600000, // 1 hour in milliseconds
+});
+```
+
+### Automatic Cleanup
+
+Implement periodic cleanup for idle sessions:
+
+```typescript title="cleanup-worker.ts"
+import { ClaudeCode } from '@dotdo/claude/server';
+
+export default {
+  async scheduled(event: ScheduledEvent, env: Env) {
+    const id = env.CLAUDE_CODE.idFromName('cleanup');
+    const stub = env.CLAUDE_CODE.get(id);
+
+    // Clean up sessions idle for more than 30 minutes
+    const sessions = await stub.listSessions();
+    const now = Date.now();
+    const maxIdleTime = 30 * 60 * 1000;
+
+    for (const session of sessions) {
+      if (session.status === 'idle') {
+        const idleTime = now - new Date(session.lastActivity).getTime();
+        if (idleTime > maxIdleTime) {
+          await stub.destroySession(session.id);
+          console.log(`Cleaned up idle session: ${session.id}`);
+        }
+      }
+    }
+  },
+};
+```
+
+Configure the cleanup schedule in `wrangler.toml`:
+
+```toml title="wrangler.toml"
+[triggers]
+crons = ["*/15 * * * *"]  # Run every 15 minutes
+```
+
+### Manual Cleanup
+
+List and clean up sessions programmatically:
+
+```typescript title="manual-cleanup.ts"
+// List all sessions
+const sessions = await client.listSessions();
+console.log(`Total sessions: ${sessions.length}`);
+
+// Clean up terminated sessions
+const terminated = sessions.filter(s => s.status === 'terminated');
+for (const session of terminated) {
+  await client.destroySession(session.id);
+}
+
+// Clean up sessions older than 24 hours
+const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+const oldSessions = sessions.filter(s => s.createdAt < oneDayAgo);
+for (const session of oldSessions) {
+  await client.destroySession(session.id);
+}
+```
+
+## Resuming Sessions
+
+Resume sessions to continue conversations after disconnection, page refresh, or across multiple visits.
+
+### Basic Resumption
+
+```typescript title="resume-basic.ts"
+const sessionId = 'session-abc123';
+
+try {
+  const session = await client.resumeSession(sessionId);
+  console.log('Resumed session:', session.id);
+  console.log('Status:', session.status);
+
+  // Continue the conversation
+  const response = await client.query(session.id, 'What were we working on?');
+  console.log(response.content);
+} catch (error) {
+  if (error instanceof ClaudeClientError && error.code === 'SESSION_NOT_FOUND') {
+    console.log('Session expired, creating new session');
+    const newSession = await client.createSession({ model: 'claude-sonnet-4-20250514' });
+  }
+}
+```
+
+### Server-Side Resumption
+
+On the server, use the `resume` option when building CLI arguments:
+
+```typescript title="server-resume.ts"
+import { buildCliArgs } from '@dotdo/claude/server';
+
+const args = buildCliArgs({
+  outputFormat: 'stream-json',
+  inputFormat: 'stream-json',
+  model: 'claude-sonnet-4-20250514',
+  resume: 'previous-session-id',  // Resume this session
+  cwd: '/workspace',
+});
+```
+
+### Handling Resumption Failures
+
+Build resilient resumption logic:
+
+```typescript title="resilient-resume.ts"
+async function getOrCreateSession(
+  client: ClaudeClient,
+  sessionId: string | null,
+  options: CreateSessionOptions
+): Promise<Session> {
+  if (sessionId) {
+    try {
+      const session = await client.resumeSession(sessionId);
+      if (session.status !== 'terminated') {
+        return session;
+      }
+    } catch (error) {
+      console.log('Could not resume session, creating new one');
+    }
+  }
+
+  return client.createSession(options);
+}
+
+// Usage
+const savedId = localStorage.getItem('session_id');
+const session = await getOrCreateSession(client, savedId, {
+  model: 'claude-sonnet-4-20250514',
+  workingDirectory: '/project',
+});
+localStorage.setItem('session_id', session.id);
+```
+
+## Multi-Session Handling
+
+Production applications often manage multiple concurrent sessions for different users, projects, or tasks.
+
+### Session per User
+
+Map users to dedicated sessions:
+
+```typescript title="user-sessions.ts"
+class SessionManager {
+  private sessions = new Map<string, string>();
+  private client: ClaudeClient;
+
+  constructor(client: ClaudeClient) {
+    this.client = client;
+  }
+
+  async getSessionForUser(userId: string): Promise<Session> {
+    const existingId = this.sessions.get(userId);
+
+    if (existingId) {
+      try {
+        return await this.client.resumeSession(existingId);
+      } catch {
+        this.sessions.delete(userId);
+      }
+    }
+
+    const session = await this.client.createSession({
+      model: 'claude-sonnet-4-20250514',
+      systemPrompt: `You are assisting user ${userId}.`,
+    });
+
+    this.sessions.set(userId, session.id);
+    return session;
+  }
+
+  async destroyUserSession(userId: string): Promise<void> {
+    const sessionId = this.sessions.get(userId);
+    if (sessionId) {
+      await this.client.destroySession(sessionId);
+      this.sessions.delete(userId);
+    }
+  }
+}
+```
+
+### Session per Project
+
+Maintain separate sessions for different projects:
+
+```typescript title="project-sessions.ts"
+interface ProjectSession {
+  sessionId: string;
+  projectPath: string;
+  createdAt: Date;
+}
+
+class ProjectSessionManager {
+  private projectSessions = new Map<string, ProjectSession>();
+  private client: ClaudeClient;
+
+  constructor(client: ClaudeClient) {
+    this.client = client;
+  }
+
+  async openProject(projectPath: string): Promise<Session> {
+    // Check for existing session
+    const existing = this.projectSessions.get(projectPath);
+    if (existing) {
+      try {
+        return await this.client.resumeSession(existing.sessionId);
+      } catch {
+        this.projectSessions.delete(projectPath);
+      }
+    }
+
+    // Create new session for project
+    const session = await this.client.createSession({
+      model: 'claude-sonnet-4-20250514',
+      workingDirectory: projectPath,
+      systemPrompt: `You are working on the project at ${projectPath}.`,
+    });
+
+    this.projectSessions.set(projectPath, {
+      sessionId: session.id,
+      projectPath,
+      createdAt: new Date(),
+    });
+
+    return session;
+  }
+
+  async closeProject(projectPath: string): Promise<void> {
+    const project = this.projectSessions.get(projectPath);
+    if (project) {
+      await this.client.destroySession(project.sessionId);
+      this.projectSessions.delete(projectPath);
+    }
+  }
+
+  getActiveProjects(): string[] {
+    return Array.from(this.projectSessions.keys());
+  }
+}
+```
+
+### Session Pool
+
+For high-throughput applications, maintain a pool of ready sessions:
+
+```typescript title="session-pool.ts"
+class SessionPool {
+  private available: Session[] = [];
+  private inUse = new Set<string>();
+  private client: ClaudeClient;
+  private maxSize: number;
+  private sessionOptions: CreateSessionOptions;
+
+  constructor(
+    client: ClaudeClient,
+    maxSize: number,
+    options: CreateSessionOptions
+  ) {
+    this.client = client;
+    this.maxSize = maxSize;
+    this.sessionOptions = options;
+  }
+
+  async initialize(preWarmCount: number = 2): Promise<void> {
+    const createPromises = Array.from(
+      { length: Math.min(preWarmCount, this.maxSize) },
+      () => this.client.createSession(this.sessionOptions)
+    );
+
+    const sessions = await Promise.all(createPromises);
+    this.available.push(...sessions);
+    console.log(`Pool initialized with ${sessions.length} sessions`);
+  }
+
+  async acquire(): Promise<Session> {
+    // Return existing available session
+    if (this.available.length > 0) {
+      const session = this.available.pop()!;
+      this.inUse.add(session.id);
+      return session;
+    }
+
+    // Create new session if under limit
+    if (this.inUse.size < this.maxSize) {
+      const session = await this.client.createSession(this.sessionOptions);
+      this.inUse.add(session.id);
+      return session;
+    }
+
+    // Wait for available session
+    throw new Error('No sessions available and pool at capacity');
+  }
+
+  release(sessionId: string): void {
+    if (this.inUse.has(sessionId)) {
+      this.inUse.delete(sessionId);
+      // Re-add to available pool (session retains context)
+      this.client.getSession(sessionId).then(session => {
+        if (session && session.status === 'active') {
+          this.available.push(session);
+        }
+      });
+    }
+  }
+
+  async drain(): Promise<void> {
+    const allSessions = [
+      ...this.available,
+      ...Array.from(this.inUse).map(id => ({ id })),
+    ];
+
+    await Promise.all(
+      allSessions.map(s => this.client.destroySession(s.id))
+    );
+
+    this.available = [];
+    this.inUse.clear();
+  }
+}
+
+// Usage
+const pool = new SessionPool(client, 10, {
+  model: 'claude-sonnet-4-20250514',
+});
+
+await pool.initialize(3);
+
+const session = await pool.acquire();
+try {
+  await client.query(session.id, 'Process this request');
+} finally {
+  pool.release(session.id);
+}
+```
+
+## Best Practices
+
+### Resource Management
+
+| Practice | Description |
+|----------|-------------|
+| Always destroy sessions | Use try/finally to ensure cleanup |
+| Set appropriate TTLs | Prevent orphaned sessions from consuming resources |
+| Monitor session counts | Alert when approaching capacity limits |
+| Use connection pooling | Reuse connections across sessions |
+
+### Error Handling
+
+```typescript title="error-handling.ts"
+import { ClaudeClientError } from '@anthropic/claude-sdk';
+
+async function safeSessionOperation<T>(
+  operation: () => Promise<T>,
+  sessionId: string,
+  client: ClaudeClient
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof ClaudeClientError) {
+      switch (error.code) {
+        case 'SESSION_NOT_FOUND':
+          throw new Error(`Session ${sessionId} does not exist`);
+        case 'SESSION_TERMINATED':
+          throw new Error(`Session ${sessionId} has been terminated`);
+        case 'TIMEOUT':
+          // Attempt to interrupt and retry
+          await client.interrupt(sessionId);
+          throw new Error('Operation timed out');
+        default:
+          throw error;
+      }
+    }
+    throw error;
+  }
+}
+```
+
+### Session Metadata
+
+Store metadata alongside sessions for easier management:
+
+```typescript title="session-metadata.ts"
+interface SessionMetadata {
+  userId: string;
+  projectId: string;
+  purpose: string;
+  tags: string[];
+  createdAt: Date;
+}
+
+const metadataStore = new Map<string, SessionMetadata>();
+
+async function createTrackedSession(
+  client: ClaudeClient,
+  options: CreateSessionOptions,
+  metadata: Omit<SessionMetadata, 'createdAt'>
+): Promise<Session> {
+  const session = await client.createSession(options);
+
+  metadataStore.set(session.id, {
+    ...metadata,
+    createdAt: new Date(),
+  });
+
+  return session;
+}
+
+function findSessionsByTag(tag: string): string[] {
+  const results: string[] = [];
+  for (const [id, meta] of metadataStore) {
+    if (meta.tags.includes(tag)) {
+      results.push(id);
+    }
+  }
+  return results;
+}
+```
+
+## Related
+
+- [ClaudeClient Reference](/sdk/client) - Complete client API documentation
+- [ClaudeCode Server](/sdk/server) - Server-side session management
+- [Streaming Guide](/guides/streaming) - Real-time response handling
+- [Authentication](/guides/authentication) - Securing session access

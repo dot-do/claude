@@ -1,0 +1,93 @@
+---
+title: "@dotdo/claude Documentation"
+description: SDK and UI components for building Claude Code-powered web applications on Cloudflare's edge infrastructure
+---
+
+Build powerful AI coding assistants with Claude Code. This SDK provides everything you need to create web-based IDE experiences powered by Claude, running on Cloudflare Workers and Durable Objects.
+
+## Packages
+
+<Cards>
+  <Card title="@dotdo/claude" href="/sdk">
+    TypeScript SDK for Claude Code with RPC client, Cloudflare Durable Object server, and event streaming.
+  </Card>
+  <Card title="@dotdo/terminal" href="/terminal">
+    React components for terminal UI, chat interface, file tree, diff viewer, and more.
+  </Card>
+</Cards>
+
+## Quick Example
+
+```typescript title="client.ts"
+import { createClaudeClient } from '@dotdo/claude'
+
+const claude = createClaudeClient({
+  url: 'wss://your-worker.workers.dev/rpc',
+  callbacks: {
+    onMessage: (msg) => console.log('Claude:', msg),
+    onTodoUpdate: (update) => console.log('Todos:', update.todos),
+  }
+})
+
+const session = await claude.createSession({ cwd: '/workspace' })
+await claude.sendMessage(session.id, 'Build a todo app in React')
+```
+
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **Session Management** | Create, resume, and manage Claude Code sessions |
+| **Real-time Streaming** | WebSocket and SSE support for live updates |
+| **Event Callbacks** | Typed callbacks for todos, plans, tools, and results |
+| **Edge Deployment** | Built for Cloudflare Workers and Durable Objects |
+| **React Components** | Production-ready terminal, chat, and IDE components |
+| **Type Safety** | Full TypeScript support with comprehensive types |
+
+## Architecture
+
+```
+┌─────────────────┐     WebSocket/RPC     ┌──────────────────┐
+│  Your Web App   │ ◄──────────────────► │  Cloudflare DO   │
+│  (ClaudeClient) │                       │  (ClaudeCode)    │
+└─────────────────┘                       └────────┬─────────┘
+                                                   │
+                                                   │ stdin/stdout
+                                                   ▼
+                                          ┌──────────────────┐
+                                          │   Claude Code    │
+                                          │      CLI         │
+                                          └──────────────────┘
+```
+
+## Getting Started
+
+<Cards>
+  <Card title="Installation" href="/getting-started/installation">
+    Install the SDK and terminal packages
+  </Card>
+  <Card title="Quick Start" href="/getting-started/quick-start">
+    Build your first Claude-powered app in 5 minutes
+  </Card>
+  <Card title="Core Concepts" href="/getting-started/concepts">
+    Understand sessions, RPC, and event streaming
+  </Card>
+</Cards>
+
+## Guides
+
+- [Deploy to Cloudflare Workers](/guides/cloudflare-deployment)
+- [Add Authentication](/guides/authentication)
+- [Manage Sessions](/guides/session-management)
+- [Work with Streaming](/guides/streaming)
+
+## Examples
+
+- [Basic Chat Interface](/examples/basic-chat)
+- [Full IDE Layout](/examples/ide-layout)
+- [Embedded Terminal](/examples/embedded-terminal)
+
+## Reference
+
+- [Types Reference](/reference/types) - Complete TypeScript type definitions
+- [Error Codes](/reference/error-codes) - Error handling and troubleshooting

@@ -1,0 +1,12 @@
+{
+  "title": "@dotdo/claude",
+  "pages": [
+    "index",
+    "getting-started",
+    "sdk",
+    "terminal",
+    "guides",
+    "examples",
+    "reference"
+  ]
+}

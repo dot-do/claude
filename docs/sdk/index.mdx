@@ -1,0 +1,151 @@
+---
+title: SDK Overview
+description: Complete guide to the @dotdo/claude SDK - a TypeScript SDK for building Claude Code-powered applications with client, server, RPC, events, and types modules
+---
+
+The `@dotdo/claude` SDK provides everything you need to build Claude Code-powered applications. It includes a typed client for browser applications, Cloudflare Durable Object integration for servers, bidirectional RPC communication, and comprehensive TypeScript types.
+
+## Architecture
+
+The SDK is organized into five core modules:
+
+| Module | Purpose | Environment |
+|--------|---------|-------------|
+| **Client** | WebSocket RPC client with callbacks | Browser, Node.js |
+| **Server** | Durable Object and sandbox integration | Cloudflare Workers |
+| **RPC** | Bidirectional Cap'n Web RPC layer | Universal |
+| **Events** | Type-safe event emitter | Universal |
+| **Types** | TypeScript definitions | Universal |
+
+## Entry Points
+
+The SDK provides multiple entry points for different use cases:
+
+### Main Entry (`@dotdo/claude`)
+
+The main entry point re-exports everything for convenience:
+
+```typescript
+import {
+  ClaudeClient,
+  createClaudeClient,
+  ClaudeCode,
+  TypedEventEmitter,
+  RpcSession,
+} from '@dotdo/claude'
+```
+
+### Client Entry (`@dotdo/claude/client`)
+
+Use this for browser applications that connect to a Claude Code backend:
+
+```typescript
+import { ClaudeClient, createClaudeClient } from '@dotdo/claude/client'
+
+const client = createClaudeClient({
+  url: 'wss://claude.example.com/rpc',
+  callbacks: {
+    onTodoUpdate: (update) => console.log('Todos:', update.todos),
+    onPlanUpdate: (update) => console.log('Plan:', update.plan),
+  }
+})
+```
+
+### Server Entry (`@dotdo/claude/server`)
+
+Use this for Cloudflare Workers that host Claude Code:
+
+```typescript
+import { ClaudeCode, ProcessManager, NDJSONParser } from '@dotdo/claude/server'
+
+export { ClaudeCode }
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const id = env.CLAUDE_CODE.idFromName('default')
+    const stub = env.CLAUDE_CODE.get(id)
+    return stub.fetch(request)
+  }
+}
+```
+
+### RPC Entry (`@dotdo/claude/rpc`)
+
+Use this for low-level RPC operations and custom integrations:
+
+```typescript
+import {
+  RpcSession,
+  newWebSocketRpcSession,
+  createRpcHandler,
+} from '@dotdo/claude/rpc'
+import type { IClaudeCodeRpc } from '@dotdo/claude/rpc'
+
+const session = newWebSocketRpcSession<IClaudeCodeRpc>('wss://claude.example.com/rpc')
+const stub = await session.connect()
+
+const claudeSession = await stub.createSession({ cwd: '/workspace' })
+await stub.sendMessage(claudeSession.id, 'Hello!')
+```
+
+## Quick Example
+
+Here's a complete example showing how the modules work together:
+
+```typescript title="app.ts"
+import { createClaudeClient } from '@dotdo/claude'
+
+// Create client with real-time callbacks
+const claude = createClaudeClient({
+  url: 'wss://api.example.com/rpc',
+  callbacks: {
+    onMessage: (msg) => console.log('Message:', msg),
+    onTodoUpdate: (update) => renderTodos(update.todos),
+    onPlanUpdate: (update) => renderPlan(update.plan),
+    onComplete: (result) => console.log('Done:', result),
+    onError: (error) => console.error('Error:', error),
+  }
+})
+
+// Create a session and send messages
+const session = await claude.createSession({ cwd: '/workspace' })
+await claude.sendMessage(session.id, 'Build a React todo app')
+
+// Send follow-up messages while Claude is working
+await claude.sendMessage(session.id, 'Use TypeScript please')
+```
+
+## Key Features
+
+- **Type Safety** - Full TypeScript support with comprehensive type definitions
+- **Real-time Updates** - Bidirectional RPC for streaming todos, plans, and tool events
+- **Interactive Input** - Send multiple messages while Claude is processing
+- **Session Management** - Create, resume, list, and destroy sessions
+- **Cloudflare Integration** - First-class support for Durable Objects and sandboxes
+- **Event System** - Subscribe to specific events with type-safe callbacks
+
+## Module Reference
+
+<Cards>
+  <Card title="Client" href="/sdk/client">
+    WebSocket RPC client for connecting to Claude Code from browsers and Node.js applications
+  </Card>
+  <Card title="Server" href="/sdk/server">
+    Cloudflare Durable Object, process management, and NDJSON parsing for hosting Claude Code
+  </Card>
+  <Card title="RPC" href="/sdk/rpc">
+    Cap'n Web RPC integration for bidirectional communication with promise pipelining
+  </Card>
+  <Card title="Events" href="/sdk/events">
+    Type-safe event emitter for subscribing to Claude Code events with wildcard support
+  </Card>
+  <Card title="Types" href="/sdk/types">
+    TypeScript definitions for messages, events, options, sessions, and type guards
+  </Card>
+</Cards>
+
+## Next Steps
+
+- [Installation Guide](/getting-started/installation) - Get started with npm, pnpm, or yarn
+- [Quick Start](/getting-started/quick-start) - Build your first Claude-powered app
+- [Core Concepts](/getting-started/concepts) - Learn about sessions and event streaming

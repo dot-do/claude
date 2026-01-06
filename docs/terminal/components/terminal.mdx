@@ -1,0 +1,314 @@
+---
+title: Terminal
+description: A React terminal emulator component built on xterm.js with WebSocket PTY connection support, theming, and WebGL rendering.
+---
+
+The `Terminal` component is a full-featured terminal emulator built on [xterm.js](https://xtermjs.org/). It supports WebSocket-based PTY connections, ANSI rendering, keyboard handling, and theming.
+
+## Installation
+
+```bash
+npm install @dotdo/terminal
+```
+
+## Basic Usage
+
+```tsx title="BasicTerminal.tsx"
+import { Terminal } from '@dotdo/terminal'
+
+function App() {
+  return (
+    <div style={{ width: '100%', height: '400px' }}>
+      <Terminal
+        wsUrl="wss://your-terminal-server.com/ws"
+        onConnect={() => console.log('Connected')}
+        onDisconnect={() => console.log('Disconnected')}
+      />
+    </div>
+  )
+}
+```
+
+## TerminalProps
+
+The `Terminal` component accepts the following props:
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `wsUrl` | `string` | - | WebSocket URL for PTY connection |
+| `onData` | `(data: string) => void` | - | Called when terminal sends data (user input) |
+| `onResize` | `(size: { cols: number; rows: number }) => void` | - | Called when terminal resizes |
+| `onConnect` | `() => void` | - | Called when WebSocket connects |
+| `onDisconnect` | `() => void` | - | Called when WebSocket disconnects |
+| `onError` | `(error: Event) => void` | - | Called on WebSocket error |
+| `data` | `string` | - | Incoming data to write to terminal |
+| `theme` | `TerminalTheme` | `darkTerminalTheme` | Terminal color theme |
+| `fontSize` | `number` | `14` | Font size in pixels |
+| `fontFamily` | `string` | `'Menlo, Monaco, "Courier New", monospace'` | Font family |
+| `webgl` | `boolean` | `true` | Enable WebGL renderer for better performance |
+| `autoFocus` | `boolean` | `false` | Auto-focus terminal on mount |
+| `ariaLabel` | `string` | `'Terminal'` | Aria label for accessibility |
+| `className` | `string` | `''` | Additional CSS class |
+
+## TerminalRef
+
+Access imperative methods by passing a ref to the `Terminal` component:
+
+```tsx title="TerminalWithRef.tsx"
+import { useRef } from 'react'
+import { Terminal, TerminalRef } from '@dotdo/terminal'
+
+function App() {
+  const terminalRef = useRef<TerminalRef>(null)
+
+  const handleClear = () => {
+    terminalRef.current?.clear()
+  }
+
+  const handleWrite = () => {
+    terminalRef.current?.write('Hello, World!\r\n')
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: '8px' }}>
+        <button onClick={handleClear}>Clear</button>
+        <button onClick={handleWrite}>Write</button>
+      </div>
+      <div style={{ height: '400px' }}>
+        <Terminal ref={terminalRef} autoFocus />
+      </div>
+    </div>
+  )
+}
+```
+
+### TerminalRef Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `write` | `(text: string) => void` | Write text to the terminal |
+| `clear` | `() => void` | Clear the terminal screen |
+| `focus` | `() => void` | Focus the terminal |
+| `fit` | `() => void` | Fit terminal to container size |
+
+## TerminalTheme
+
+The `TerminalTheme` interface defines the color scheme for the terminal:
+
+```typescript
+interface TerminalTheme {
+  background?: string
+  foreground?: string
+  cursor?: string
+  cursorAccent?: string
+  selectionBackground?: string
+  black?: string
+  red?: string
+  green?: string
+  yellow?: string
+  blue?: string
+  magenta?: string
+  cyan?: string
+  white?: string
+}
+```
+
+## Theme Presets
+
+The package includes two built-in theme presets:
+
+### darkTerminalTheme
+
+The default dark theme with a slate-based color palette:
+
+```typescript
+import { darkTerminalTheme } from '@dotdo/terminal'
+
+// Values:
+// background: '#020617'
+// foreground: '#e2e8f0'
+// cursor: '#3b82f6'
+// cursorAccent: '#ffffff'
+// selectionBackground: 'rgba(59, 130, 246, 0.3)'
+// black: '#1e293b'
+// red: '#ef4444'
+// green: '#22c55e'
+// yellow: '#f59e0b'
+// blue: '#3b82f6'
+// magenta: '#a855f7'
+// cyan: '#06b6d4'
+// white: '#f1f5f9'
+```
+
+### lightTerminalTheme
+
+A light theme for bright environments:
+
+```typescript
+import { lightTerminalTheme } from '@dotdo/terminal'
+
+// Values:
+// background: '#f8fafc'
+// foreground: '#1e293b'
+// cursor: '#3b82f6'
+// cursorAccent: '#ffffff'
+// selectionBackground: 'rgba(59, 130, 246, 0.3)'
+// black: '#64748b'
+// red: '#dc2626'
+// green: '#16a34a'
+// yellow: '#d97706'
+// blue: '#2563eb'
+// magenta: '#9333ea'
+// cyan: '#0891b2'
+// white: '#f1f5f9'
+```
+
+### Custom Theme Example
+
+```tsx title="CustomTheme.tsx"
+import { Terminal, TerminalTheme } from '@dotdo/terminal'
+
+const customTheme: TerminalTheme = {
+  background: '#1a1b26',
+  foreground: '#c0caf5',
+  cursor: '#c0caf5',
+  cursorAccent: '#1a1b26',
+  selectionBackground: 'rgba(192, 202, 245, 0.3)',
+  black: '#15161e',
+  red: '#f7768e',
+  green: '#9ece6a',
+  yellow: '#e0af68',
+  blue: '#7aa2f7',
+  magenta: '#bb9af7',
+  cyan: '#7dcfff',
+  white: '#a9b1d6',
+}
+
+function App() {
+  return <Terminal theme={customTheme} />
+}
+```
+
+## WebSocket Connection
+
+The `Terminal` component handles WebSocket connections automatically when a `wsUrl` is provided.
+
+### Message Protocol
+
+The terminal expects JSON messages with the following format:
+
+**Outgoing (terminal to server):**
+
+```typescript
+// User input
+{ type: 'input', data: string }
+
+// Terminal resize
+{ type: 'resize', cols: number, rows: number }
+```
+
+**Incoming (server to terminal):**
+
+```typescript
+// Terminal output
+{ type: 'output', data: string }
+```
+
+Raw string data is also supported for incoming messages.
+
+### Connection Lifecycle
+
+```tsx title="ConnectionHandling.tsx"
+import { Terminal } from '@dotdo/terminal'
+
+function App() {
+  return (
+    <Terminal
+      wsUrl="wss://your-server.com/ws"
+      onConnect={() => {
+        console.log('WebSocket connected')
+      }}
+      onDisconnect={() => {
+        console.log('WebSocket disconnected')
+      }}
+      onError={(error) => {
+        console.error('WebSocket error:', error)
+      }}
+    />
+  )
+}
+```
+
+### Handling Resize Events
+
+The terminal automatically sends resize events to the server when the terminal dimensions change:
+
+```tsx title="ResizeHandling.tsx"
+import { Terminal } from '@dotdo/terminal'
+
+function App() {
+  return (
+    <Terminal
+      wsUrl="wss://your-server.com/ws"
+      onResize={({ cols, rows }) => {
+        console.log(`Terminal resized to ${cols}x${rows}`)
+      }}
+    />
+  )
+}
+```
+
+## Controlled Data Mode
+
+For scenarios where you manage data flow externally (without WebSocket):
+
+```tsx title="ControlledMode.tsx"
+import { useState } from 'react'
+import { Terminal } from '@dotdo/terminal'
+
+function App() {
+  const [output, setOutput] = useState('')
+
+  const handleUserInput = (data: string) => {
+    // Echo input back to terminal
+    setOutput((prev) => prev + data)
+  }
+
+  return (
+    <Terminal
+      data={output}
+      onData={handleUserInput}
+    />
+  )
+}
+```
+
+## Performance
+
+The terminal uses WebGL rendering by default for optimal performance. If WebGL is not available, it falls back to a canvas-based renderer automatically.
+
+To disable WebGL rendering:
+
+```tsx
+<Terminal webgl={false} />
+```
+
+## Accessibility
+
+The terminal includes built-in accessibility features:
+
+- Screen reader mode enabled by default
+- Proper ARIA attributes (`role="region"`, `aria-label`, `aria-live="polite"`)
+- Keyboard navigation support
+- Customizable aria label via `ariaLabel` prop
+
+```tsx
+<Terminal ariaLabel="Claude Code Terminal" />
+```
+
+## Next Steps
+
+- [Theme Customization](/terminal/themes) - Learn more about theming options
+- [Layout Component](/terminal/components/layout) - Compose terminal with other UI elements
+- [Embedding Guide](/terminal/embedding) - Embed terminals in external applications

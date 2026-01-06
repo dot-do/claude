@@ -1,0 +1,416 @@
+---
+title: Error Handling
+description: Comprehensive guide to error codes, error classes, and recovery strategies for the Claude SDK
+---
+
+The Claude SDK provides structured error handling through dedicated error classes and standardized error codes. This enables programmatic error handling and graceful recovery from failure conditions.
+
+## Error Classes
+
+### ClaudeClientError
+
+The `ClaudeClientError` class represents client-side errors that occur during communication with the Claude server.
+
+```typescript
+class ClaudeClientError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public errorId?: string
+  )
+
+  name: 'ClaudeClientError'
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `message` | `string` | Human-readable error description |
+| `status` | `number` | HTTP-style status code |
+| `errorId` | `string` | Optional unique identifier for error tracking |
+| `name` | `string` | Always `'ClaudeClientError'` |
+
+**Example:**
+
+```typescript
+import { ClaudeClient, ClaudeClientError } from '@anthropic/claude-sdk';
+
+const client = new ClaudeClient({ url: 'wss://api.example.com/rpc' });
+
+try {
+  await client.interrupt();
+} catch (error) {
+  if (error instanceof ClaudeClientError) {
+    console.error(`Client error [${error.status}]: ${error.message}`);
+    if (error.errorId) {
+      console.error(`Error ID: ${error.errorId}`);
+    }
+  }
+}
+```
+
+### RpcError
+
+The `RpcError` class represents errors that occur during RPC operations, typically from the server side.
+
+```typescript
+class RpcError extends Error {
+  constructor(
+    message: string,
+    public code: ErrorCode,
+    public details?: unknown
+  )
+
+  name: 'RpcError'
+}
+```
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `message` | `string` | Human-readable error description |
+| `code` | `ErrorCode` | Standardized error code from `ErrorCodes` |
+| `details` | `unknown` | Optional additional error context |
+| `name` | `string` | Always `'RpcError'` |
+
+**Example:**
+
+```typescript
+import { RpcError, ErrorCodes } from '@anthropic/claude-sdk';
+
+try {
+  await client.getSession('invalid-session-id');
+} catch (error) {
+  if (error instanceof RpcError) {
+    switch (error.code) {
+      case ErrorCodes.SESSION_NOT_FOUND:
+        console.error('Session does not exist');
+        break;
+      case ErrorCodes.PERMISSION_DENIED:
+        console.error('Access denied');
+        break;
+      default:
+        console.error(`RPC error [${error.code}]: ${error.message}`);
+    }
+  }
+}
+```
+
+## ErrorCodes
+
+The `ErrorCodes` constant defines all standardized error codes used throughout the SDK.
+
+```typescript
+const ErrorCodes = {
+  SESSION_NOT_FOUND: 'SESSION_NOT_FOUND',
+  SESSION_TIMEOUT: 'SESSION_TIMEOUT',
+  SESSION_CANCELLED: 'SESSION_CANCELLED',
+  PROCESS_ERROR: 'PROCESS_ERROR',
+  PERMISSION_DENIED: 'PERMISSION_DENIED',
+  INVALID_INPUT: 'INVALID_INPUT',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const;
+
+type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
+```
+
+| Code | Value | Description |
+|------|-------|-------------|
+| `SESSION_NOT_FOUND` | `'SESSION_NOT_FOUND'` | The requested session does not exist or has expired |
+| `SESSION_TIMEOUT` | `'SESSION_TIMEOUT'` | The session operation exceeded the timeout limit |
+| `SESSION_CANCELLED` | `'SESSION_CANCELLED'` | The session was cancelled by user or system |
+| `PROCESS_ERROR` | `'PROCESS_ERROR'` | An error occurred in the underlying process |
+| `PERMISSION_DENIED` | `'PERMISSION_DENIED'` | The operation requires permissions that were not granted |
+| `INVALID_INPUT` | `'INVALID_INPUT'` | The provided input failed validation |
+| `INTERNAL_ERROR` | `'INTERNAL_ERROR'` | An unexpected internal error occurred |
+
+## Error Handling Patterns
+
+### Basic Error Handling
+
+Always wrap SDK operations in try-catch blocks and handle errors appropriately:
+
+```typescript
+import {
+  ClaudeClient,
+  ClaudeClientError,
+  RpcError,
+  ErrorCodes,
+} from '@anthropic/claude-sdk';
+
+async function safeQuery(client: ClaudeClient, prompt: string) {
+  try {
+    const session = await client.createSession();
+    await client.sendMessage(session.id, prompt);
+    return { success: true };
+  } catch (error) {
+    if (error instanceof ClaudeClientError) {
+      return { success: false, type: 'client', error };
+    }
+    if (error instanceof RpcError) {
+      return { success: false, type: 'rpc', error };
+    }
+    throw error; // Re-throw unexpected errors
+  }
+}
+```
+
+### Error Type Guards
+
+Use `instanceof` checks to differentiate between error types:
+
+```typescript
+function handleError(error: unknown): void {
+  if (error instanceof ClaudeClientError) {
+    // Handle client-side errors (connection, authentication, etc.)
+    console.error(`Client Error: ${error.message} (status: ${error.status})`);
+  } else if (error instanceof RpcError) {
+    // Handle server-side RPC errors
+    console.error(`RPC Error: ${error.message} (code: ${error.code})`);
+  } else if (error instanceof Error) {
+    // Handle generic errors
+    console.error(`Error: ${error.message}`);
+  } else {
+    // Handle unknown error types
+    console.error('Unknown error:', error);
+  }
+}
+```
+
+### Error Code Switch Pattern
+
+Handle specific error codes with appropriate responses:
+
+```typescript
+import { RpcError, ErrorCodes } from '@anthropic/claude-sdk';
+
+function handleRpcError(error: RpcError): string {
+  switch (error.code) {
+    case ErrorCodes.SESSION_NOT_FOUND:
+      return 'Session expired. Please create a new session.';
+
+    case ErrorCodes.SESSION_TIMEOUT:
+      return 'Request timed out. Please try again.';
+
+    case ErrorCodes.SESSION_CANCELLED:
+      return 'Operation was cancelled.';
+
+    case ErrorCodes.PROCESS_ERROR:
+      return 'Processing error occurred. Check your input and retry.';
+
+    case ErrorCodes.PERMISSION_DENIED:
+      return 'Permission denied. Check your credentials.';
+
+    case ErrorCodes.INVALID_INPUT:
+      return 'Invalid input provided. Please check your request.';
+
+    case ErrorCodes.INTERNAL_ERROR:
+      return 'Internal server error. Please try again later.';
+
+    default:
+      return `Unknown error: ${error.message}`;
+  }
+}
+```
+
+## Recovery Strategies
+
+### Retry with Exponential Backoff
+
+For transient errors, implement retry logic with exponential backoff:
+
+```typescript
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  maxAttempts: number = 3,
+  baseDelayMs: number = 1000
+): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+
+      // Don't retry non-retryable errors
+      if (error instanceof RpcError) {
+        if (
+          error.code === ErrorCodes.PERMISSION_DENIED ||
+          error.code === ErrorCodes.INVALID_INPUT
+        ) {
+          throw error;
+        }
+      }
+
+      if (attempt < maxAttempts) {
+        const delay = baseDelayMs * Math.pow(2, attempt - 1);
+        console.log(`Attempt ${attempt} failed, retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+// Usage
+const result = await withRetry(
+  () => client.sendMessage(sessionId, 'Hello'),
+  3,
+  1000
+);
+```
+
+### Session Recovery
+
+Handle session-related errors by creating new sessions:
+
+```typescript
+async function sendWithSessionRecovery(
+  client: ClaudeClient,
+  message: string
+): Promise<void> {
+  let sessionId = client.currentSession?.id;
+
+  try {
+    if (!sessionId) {
+      const session = await client.createSession();
+      sessionId = session.id;
+    }
+    await client.sendMessage(sessionId, message);
+  } catch (error) {
+    if (error instanceof RpcError) {
+      if (error.code === ErrorCodes.SESSION_NOT_FOUND) {
+        // Session expired, create a new one
+        console.log('Session expired, creating new session...');
+        const newSession = await client.createSession();
+        await client.sendMessage(newSession.id, message);
+        return;
+      }
+    }
+    throw error;
+  }
+}
+```
+
+### Connection Recovery
+
+Handle connection failures with automatic reconnection:
+
+```typescript
+class ResilientClient {
+  private client: ClaudeClient;
+  private isConnecting = false;
+
+  constructor(options: ClaudeClientOptions) {
+    this.client = new ClaudeClient({
+      ...options,
+      autoReconnect: true,
+      maxReconnectAttempts: 5,
+    });
+  }
+
+  async ensureConnected(): Promise<void> {
+    if (this.client.connected) return;
+
+    if (this.isConnecting) {
+      // Wait for existing connection attempt
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return this.ensureConnected();
+    }
+
+    this.isConnecting = true;
+    try {
+      await this.client.connect();
+    } finally {
+      this.isConnecting = false;
+    }
+  }
+
+  async sendMessage(sessionId: string, message: string): Promise<void> {
+    await this.ensureConnected();
+
+    try {
+      await this.client.sendMessage(sessionId, message);
+    } catch (error) {
+      if (error instanceof ClaudeClientError && error.status === 500) {
+        // Connection lost, reconnect and retry
+        await this.ensureConnected();
+        await this.client.sendMessage(sessionId, message);
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+```
+
+### Graceful Degradation
+
+Provide fallback behavior when errors occur:
+
+```typescript
+async function queryWithFallback(
+  client: ClaudeClient,
+  prompt: string,
+  fallbackResponse: string
+): Promise<string> {
+  try {
+    const session = await client.createSession();
+    const result = await client.query(prompt);
+    return result;
+  } catch (error) {
+    console.error('Query failed, using fallback:', error);
+    return fallbackResponse;
+  }
+}
+```
+
+## Error Logging
+
+Implement comprehensive error logging for debugging:
+
+```typescript
+function logError(error: unknown, context: Record<string, unknown> = {}): void {
+  const timestamp = new Date().toISOString();
+  const baseLog = { timestamp, ...context };
+
+  if (error instanceof ClaudeClientError) {
+    console.error(JSON.stringify({
+      ...baseLog,
+      type: 'ClaudeClientError',
+      status: error.status,
+      message: error.message,
+      errorId: error.errorId,
+    }));
+  } else if (error instanceof RpcError) {
+    console.error(JSON.stringify({
+      ...baseLog,
+      type: 'RpcError',
+      code: error.code,
+      message: error.message,
+      details: error.details,
+    }));
+  } else if (error instanceof Error) {
+    console.error(JSON.stringify({
+      ...baseLog,
+      type: 'Error',
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    }));
+  } else {
+    console.error(JSON.stringify({
+      ...baseLog,
+      type: 'Unknown',
+      error: String(error),
+    }));
+  }
+}
+```
+
+## Next Steps
+
+- [ClaudeClient Reference](/sdk/client) - Learn about the client API
+- [RPC Reference](/sdk/rpc) - Understand RPC operations
+- [Session Management](/guides/session-management) - Managing sessions effectively

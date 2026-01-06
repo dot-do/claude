@@ -1,0 +1,622 @@
+---
+title: RPC Layer
+description: Cap'n Web RPC integration for bidirectional communication with Claude Code sessions
+---
+
+The RPC layer provides a type-safe, bidirectional communication protocol built on [Cap'n Web](https://github.com/nicolo-ribaudo/capnweb). It enables real-time streaming, promise pipelining, and remote procedure calls between clients and Claude Code sessions.
+
+## Installation
+
+The RPC layer is included in the `@dotdo/claude` package:
+
+```bash
+npm install @dotdo/claude
+```
+
+## Quick Start
+
+```typescript
+import { createRpcSession, type IClaudeCodeRpc } from '@dotdo/claude/rpc'
+
+// Create and connect to an RPC session
+const session = createRpcSession<IClaudeCodeRpc>({
+  url: 'wss://your-worker.workers.dev/rpc',
+  reconnect: true,
+})
+
+const stub = await session.connect()
+
+// Create a Claude session
+const claudeSession = await stub.createSession({
+  model: 'claude-sonnet-4-20250514',
+  systemPrompt: 'You are a helpful assistant.',
+})
+
+// Send a message
+await stub.sendMessage(claudeSession.id, 'Hello, Claude!')
+```
+
+## RpcSession Class
+
+The `RpcSession` class manages WebSocket-based RPC connections with automatic reconnection, state tracking, and message handling.
+
+### Constructor
+
+```typescript
+const session = new RpcSession<T>(options: RpcSessionOptions)
+```
+
+### RpcSessionOptions
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `url` | `string` | Yes | - | WebSocket URL for the RPC endpoint |
+| `reconnect` | `boolean` | No | `false` | Enable automatic reconnection |
+| `reconnectDelay` | `number` | No | `1000` | Base delay between reconnection attempts (ms) |
+| `maxReconnectAttempts` | `number` | No | `5` | Maximum number of reconnection attempts |
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `state` | `RpcSessionState` | Current connection state |
+
+### Methods
+
+#### `connect()`
+
+Establishes a WebSocket connection and returns a typed RPC stub.
+
+```typescript
+const stub = await session.connect()
+```
+
+**Returns:** `Promise<RpcStub<T>>`
+
+**Throws:** `Error` when connection fails
+
+#### `disconnect()`
+
+Closes the connection and cleans up resources.
+
+```typescript
+session.disconnect()
+```
+
+#### `getStub()`
+
+Returns the current RPC stub if connected.
+
+```typescript
+const stub = session.getStub()
+```
+
+**Returns:** `RpcStub<T>`
+
+**Throws:** `Error` if not connected
+
+#### `onStateChange(listener)`
+
+Subscribes to connection state changes.
+
+```typescript
+const unsubscribe = session.onStateChange((state) => {
+  console.log('Connection state:', state)
+})
+
+// Clean up
+unsubscribe()
+```
+
+**Returns:** `() => void` - Unsubscribe function
+
+#### `onMessage(listener)`
+
+Subscribes to raw RPC messages.
+
+```typescript
+const unsubscribe = session.onMessage((data) => {
+  console.log('Received:', data)
+})
+```
+
+**Returns:** `() => void` - Unsubscribe function
+
+#### `send(data)`
+
+Sends raw data over the WebSocket connection.
+
+```typescript
+session.send({ type: 'custom', payload: data })
+```
+
+## Connection State Management
+
+The session tracks connection state through the `RpcSessionState` type:
+
+```typescript
+type RpcSessionState = 'connecting' | 'connected' | 'disconnected' | 'error'
+```
+
+### State Transitions
+
+| From | To | Trigger |
+|------|-----|---------|
+| `disconnected` | `connecting` | `connect()` called |
+| `connecting` | `connected` | WebSocket opens successfully |
+| `connecting` | `error` | WebSocket error occurs |
+| `connected` | `disconnected` | Connection closes |
+| `error` | `connecting` | Auto-reconnect (if enabled) |
+
+### Example: State Monitoring
+
+```typescript
+const session = createRpcSession<IClaudeCodeRpc>({
+  url: 'wss://api.example.com/rpc',
+  reconnect: true,
+})
+
+session.onStateChange((state) => {
+  switch (state) {
+    case 'connecting':
+      showLoadingIndicator()
+      break
+    case 'connected':
+      hideLoadingIndicator()
+      enableUI()
+      break
+    case 'disconnected':
+      disableUI()
+      showReconnectingMessage()
+      break
+    case 'error':
+      showErrorMessage()
+      break
+  }
+})
+```
+
+## RpcTarget Base Class
+
+The `RpcTarget` class from Cap'n Web serves as the base class for RPC-exposed objects. Extend this class to create server-side RPC implementations.
+
+```typescript
+import { RpcTarget } from '@dotdo/claude/rpc'
+
+class MyRpcServer extends RpcTarget {
+  async greet(name: string): Promise<string> {
+    return `Hello, ${name}!`
+  }
+}
+```
+
+## IClaudeCodeRpc Interface
+
+The primary RPC interface for interacting with Claude Code sessions.
+
+```typescript
+interface IClaudeCodeRpc {
+  // Session management
+  createSession(options?: ClaudeCodeOptions): Promise<ClaudeSession>
+  getSession(sessionId: string): Promise<ClaudeSession | null>
+  resumeSession(sessionId: string): Promise<ClaudeSession>
+  listSessions(): Promise<ClaudeSession[]>
+  destroySession(sessionId: string): Promise<void>
+
+  // Messaging
+  sendMessage(sessionId: string, message: string): Promise<void>
+
+  // Control
+  interrupt(sessionId: string): Promise<void>
+  setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void>
+
+  // Info
+  supportedModels(): Promise<ModelInfo[]>
+  mcpServerStatus(sessionId: string): Promise<McpServerStatus[]>
+}
+```
+
+### Session Management Methods
+
+#### `createSession(options?)`
+
+Creates a new Claude Code session.
+
+```typescript
+const session = await stub.createSession({
+  model: 'claude-sonnet-4-20250514',
+  systemPrompt: 'You are a code assistant.',
+  permissionMode: 'auto-accept',
+})
+```
+
+#### `getSession(sessionId)`
+
+Retrieves an existing session by ID.
+
+```typescript
+const session = await stub.getSession('session-123')
+if (session) {
+  console.log('Status:', session.status)
+}
+```
+
+#### `resumeSession(sessionId)`
+
+Resumes a paused or inactive session.
+
+```typescript
+const session = await stub.resumeSession('session-123')
+```
+
+#### `listSessions()`
+
+Lists all active sessions.
+
+```typescript
+const sessions = await stub.listSessions()
+for (const session of sessions) {
+  console.log(`${session.id}: ${session.status}`)
+}
+```
+
+#### `destroySession(sessionId)`
+
+Terminates and cleans up a session.
+
+```typescript
+await stub.destroySession('session-123')
+```
+
+### Control Methods
+
+#### `interrupt(sessionId)`
+
+Interrupts an in-progress operation.
+
+```typescript
+await stub.interrupt('session-123')
+```
+
+#### `setPermissionMode(sessionId, mode)`
+
+Changes the permission mode for a session.
+
+```typescript
+await stub.setPermissionMode('session-123', 'auto-accept')
+```
+
+## IStreamCallbacks Interface
+
+Interface for receiving streaming updates from Claude Code sessions. Extends `RpcTarget` to enable bidirectional RPC callbacks.
+
+```typescript
+interface IStreamCallbacks extends RpcTarget {
+  onMessage(message: SDKMessage): void
+  onTodoUpdate(update: TodoUpdate): void
+  onPlanUpdate(update: PlanUpdate): void
+  onError(error: { code: string; message: string }): void
+  onComplete(result: SDKResultMessage): void
+}
+```
+
+### Implementing Stream Callbacks
+
+```typescript
+import { RpcTarget, type IStreamCallbacks } from '@dotdo/claude/rpc'
+
+class StreamHandler extends RpcTarget implements IStreamCallbacks {
+  onMessage(message: SDKMessage): void {
+    if (message.type === 'assistant') {
+      console.log('Claude:', message.content)
+    }
+  }
+
+  onTodoUpdate(update: TodoUpdate): void {
+    console.log('Todo updated:', update)
+  }
+
+  onPlanUpdate(update: PlanUpdate): void {
+    console.log('Plan updated:', update)
+  }
+
+  onError(error: { code: string; message: string }): void {
+    console.error(`Error [${error.code}]:`, error.message)
+  }
+
+  onComplete(result: SDKResultMessage): void {
+    console.log('Completed with result:', result.result)
+  }
+}
+```
+
+### Using Callbacks with Extended Interface
+
+The `IClaudeCodeRpcWithCallbacks` interface extends `IClaudeCodeRpc` with callback-enabled methods:
+
+```typescript
+const callbacks = new StreamHandler()
+
+// Send message with streaming callbacks
+await stub.sendMessageWithCallbacks(
+  sessionId,
+  'Explain this code',
+  callbacks
+)
+
+// One-shot query with callbacks
+const result = await stub.queryWithCallbacks(
+  'Write a hello world function',
+  { model: 'claude-sonnet-4-20250514' },
+  callbacks
+)
+```
+
+## Factory Functions
+
+### `createRpcSession<T>(options)`
+
+Creates a new RPC session instance.
+
+```typescript
+import { createRpcSession, type IClaudeCodeRpc } from '@dotdo/claude/rpc'
+
+const session = createRpcSession<IClaudeCodeRpc>({
+  url: 'wss://api.example.com/rpc',
+})
+```
+
+### `newWebSocketRpcSession<T>(url, options?)`
+
+Convenience function that creates a session with sensible defaults for WebSocket connections.
+
+```typescript
+import { newWebSocketRpcSession, type IClaudeCodeRpc } from '@dotdo/claude/rpc'
+
+const session = newWebSocketRpcSession<IClaudeCodeRpc>(
+  'wss://api.example.com/rpc',
+  { maxReconnectAttempts: 10 }
+)
+```
+
+**Default Options:**
+- `reconnect: true`
+- `reconnectDelay: 1000`
+- `maxReconnectAttempts: 5`
+
+## RPC Types
+
+### RpcStub
+
+Client-side proxy type that transforms interface methods into RPC calls.
+
+```typescript
+type RpcStub<T> = {
+  [K in keyof T]: T[K] extends (...args: infer A) => infer R
+    ? (...args: A) => RpcPromise<Awaited<R>>
+    : never
+}
+```
+
+### RpcPromise
+
+Extended promise type supporting promise pipelining.
+
+```typescript
+interface RpcPromise<T> extends Promise<T> {
+  pipe(method: string, ...args: any[]): RpcPromise<any>
+}
+```
+
+### Promise Pipelining
+
+RpcPromise supports chaining method calls without waiting for intermediate results:
+
+```typescript
+// Traditional approach (3 round trips)
+const session = await stub.createSession()
+const status = await stub.getSession(session.id)
+const result = await stub.sendMessage(session.id, 'Hello')
+
+// With pipelining (fewer round trips)
+const result = stub.createSession()
+  .pipe('sendMessage', 'Hello')
+```
+
+## Error Handling
+
+### RpcError Class
+
+```typescript
+class RpcError extends Error {
+  code: ErrorCode
+  details?: unknown
+}
+```
+
+### Error Codes
+
+| Code | Description |
+|------|-------------|
+| `SESSION_NOT_FOUND` | Session ID does not exist |
+| `SESSION_TIMEOUT` | Session timed out |
+| `SESSION_CANCELLED` | Session was cancelled |
+| `PROCESS_ERROR` | Claude process error |
+| `PERMISSION_DENIED` | Permission denied for operation |
+| `INVALID_INPUT` | Invalid input parameters |
+| `INTERNAL_ERROR` | Internal server error |
+
+### Example: Error Handling
+
+```typescript
+import { RpcError, ErrorCodes } from '@dotdo/claude/rpc'
+
+try {
+  await stub.sendMessage('invalid-id', 'Hello')
+} catch (error) {
+  if (error instanceof RpcError) {
+    switch (error.code) {
+      case ErrorCodes.SESSION_NOT_FOUND:
+        console.error('Session not found, creating new one...')
+        break
+      case ErrorCodes.PERMISSION_DENIED:
+        console.error('Permission denied:', error.message)
+        break
+      default:
+        console.error('RPC error:', error.code, error.message)
+    }
+  }
+}
+```
+
+## Server-Side Setup
+
+### Creating an RPC Server
+
+```typescript
+import { ClaudeCodeRpcServer, createRpcHandler } from '@dotdo/claude/rpc'
+import { newWorkersRpcResponse } from 'capnweb'
+
+// In a Cloudflare Worker or Durable Object
+export class ClaudeCodeDO {
+  private rpcServer: ClaudeCodeRpcServer
+
+  constructor(state: DurableObjectState, env: Env) {
+    this.rpcServer = new ClaudeCodeRpcServer(this)
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    // Handle WebSocket upgrade for RPC
+    if (request.headers.get('Upgrade') === 'websocket') {
+      return newWorkersRpcResponse(request, this.rpcServer)
+    }
+
+    return new Response('Not found', { status: 404 })
+  }
+}
+```
+
+### Factory Functions
+
+#### `createRpcServer(claude)`
+
+Creates an RPC server instance from a Claude Code instance.
+
+```typescript
+import { createRpcServer } from '@dotdo/claude/rpc'
+
+const rpcServer = createRpcServer(claudeCode)
+```
+
+#### `createRpcHandler(claude)`
+
+Creates a request handler function for Worker fetch.
+
+```typescript
+import { createRpcHandler } from '@dotdo/claude/rpc'
+
+const handler = createRpcHandler(claudeCode)
+
+// In fetch
+return handler(request)
+```
+
+## Complete Example
+
+```typescript
+import {
+  createRpcSession,
+  RpcTarget,
+  type IClaudeCodeRpc,
+  type IStreamCallbacks,
+  type SDKMessage,
+  RpcError,
+} from '@dotdo/claude/rpc'
+
+// Create callback handler
+class MyCallbacks extends RpcTarget implements IStreamCallbacks {
+  private chunks: string[] = []
+
+  onMessage(message: SDKMessage): void {
+    if (message.type === 'assistant' && 'content' in message) {
+      this.chunks.push(String(message.content))
+      process.stdout.write(String(message.content))
+    }
+  }
+
+  onTodoUpdate(update: TodoUpdate): void {
+    console.log('\n[Todo]', update)
+  }
+
+  onPlanUpdate(update: PlanUpdate): void {
+    console.log('\n[Plan]', update)
+  }
+
+  onError(error: { code: string; message: string }): void {
+    console.error('\n[Error]', error.code, error.message)
+  }
+
+  onComplete(result: SDKResultMessage): void {
+    console.log('\n[Complete]', result.subtype)
+  }
+
+  getResult(): string {
+    return this.chunks.join('')
+  }
+}
+
+// Main function
+async function main() {
+  const session = createRpcSession<IClaudeCodeRpc>({
+    url: 'wss://claude-api.example.com/rpc',
+    reconnect: true,
+    maxReconnectAttempts: 3,
+  })
+
+  // Monitor connection state
+  session.onStateChange((state) => {
+    console.log('Connection:', state)
+  })
+
+  try {
+    // Connect
+    const stub = await session.connect()
+
+    // Create session
+    const claudeSession = await stub.createSession({
+      model: 'claude-sonnet-4-20250514',
+      systemPrompt: 'You are a helpful coding assistant.',
+    })
+
+    console.log('Session created:', claudeSession.id)
+
+    // Send message with callbacks
+    const callbacks = new MyCallbacks()
+    await stub.sendMessageWithCallbacks(
+      claudeSession.id,
+      'Write a TypeScript function to sort an array',
+      callbacks
+    )
+
+    // Clean up
+    await stub.destroySession(claudeSession.id)
+  } catch (error) {
+    if (error instanceof RpcError) {
+      console.error('RPC Error:', error.code, error.message)
+    } else {
+      throw error
+    }
+  } finally {
+    session.disconnect()
+  }
+}
+
+main()
+```
+
+## Related Documentation
+
+- [Client SDK](/sdk/client) - High-level client abstraction
+- [Server Integration](/sdk/server) - Server-side setup
+- [Events](/sdk/events) - Event system and subscriptions
+- [Types](/sdk/types) - TypeScript type definitions

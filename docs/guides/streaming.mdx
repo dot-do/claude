@@ -1,0 +1,783 @@
+---
+title: Streaming Responses
+description: Implement real-time streaming responses for interactive AI experiences with WebSocket and SSE transport options
+---
+
+Real-time streaming provides immediate feedback as Claude processes your requests, enabling responsive user interfaces and efficient long-running operations. This guide covers transport protocols, event callbacks, and best practices for handling streaming data.
+
+## Transport Protocols
+
+The Claude Code SDK supports two transport protocols for streaming: WebSocket and Server-Sent Events (SSE). Choose based on your deployment environment and requirements.
+
+### WebSocket vs SSE Comparison
+
+| Feature | WebSocket | SSE |
+|---------|-----------|-----|
+| Direction | Bidirectional | Server to client only |
+| Connection | Persistent | Persistent |
+| Reconnection | Manual handling | Built-in browser support |
+| Browser support | All modern browsers | All modern browsers |
+| Proxy compatibility | May require configuration | Works through HTTP proxies |
+| Binary data | Supported | Text only |
+| Recommended for | Interactive sessions, tool execution | Simple streaming, read-only clients |
+
+### WebSocket Transport
+
+WebSocket provides full-duplex communication, ideal for interactive sessions where you need to send messages while receiving responses.
+
+```typescript title="websocket-streaming.ts"
+import { createClaudeClient } from '@anthropic/claude-sdk';
+
+const client = createClaudeClient({
+  serverUrl: 'ws://localhost:3000',
+  apiKey: process.env.CLAUDE_API_KEY,
+});
+
+await client.connect();
+
+const session = await client.createSession({
+  model: 'claude-sonnet-4-20250514',
+});
+
+// Stream responses via WebSocket
+const events = client.sendMessage(session.id, 'Build a REST API');
+
+for await (const event of events) {
+  if (event.type === 'text') {
+    process.stdout.write(event.content);
+  }
+}
+```
+
+### SSE Transport
+
+SSE is simpler for one-way streaming and works well with HTTP infrastructure. Use it when you only need to receive updates.
+
+```typescript title="sse-streaming.ts"
+import { createSSEClient } from '@anthropic/claude-sdk';
+
+const client = createSSEClient({
+  serverUrl: 'https://api.example.com',
+  apiKey: process.env.CLAUDE_API_KEY,
+});
+
+// SSE automatically reconnects on connection loss
+const stream = await client.stream(sessionId, 'Analyze this codebase');
+
+stream.on('text', (content) => {
+  process.stdout.write(content);
+});
+
+stream.on('error', (error) => {
+  console.error('Stream error:', error);
+});
+
+stream.on('end', () => {
+  console.log('\nStream complete');
+});
+```
+
+## Event Callbacks
+
+The SDK provides typed event callbacks for handling different stages of Claude's response. Register handlers to process events as they arrive.
+
+### onMessage
+
+Called for each text chunk as Claude generates its response. Use this for real-time output display.
+
+```typescript title="on-message.ts"
+import { createClaudeClient, EventKeys } from '@anthropic/claude-sdk';
+
+const client = createClaudeClient({
+  serverUrl: 'ws://localhost:3000',
+});
+
+await client.connect();
+
+const session = await client.createSession({ model: 'claude-sonnet-4-20250514' });
+
+// Using event iterator
+const events = client.sendMessage(session.id, 'Explain TypeScript generics');
+
+for await (const event of events) {
+  if (event.type === 'text') {
+    // Handle incremental text output
+    updateUI(event.content);
+  }
+}
+
+// Or using the emitter pattern
+const emitter = client.getEmitter();
+
+emitter.on(EventKeys.output(session.id), (output) => {
+  // Real-time text updates
+  appendToTerminal(output.text);
+});
+```
+
+### onTodoUpdate
+
+Fired when Claude updates its task list during complex operations. Track progress for long-running tasks.
+
+```typescript title="on-todo-update.ts"
+import { EventKeys } from '@anthropic/claude-sdk';
+
+interface Todo {
+  id: string;
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
+const emitter = client.getEmitter();
+
+emitter.on(EventKeys.todo(session.id), (update: { todos: Todo[] }) => {
+  console.log('Todo list updated:');
+
+  for (const todo of update.todos) {
+    const statusIcon = {
+      pending: '[ ]',
+      in_progress: '[~]',
+      completed: '[x]',
+    }[todo.status];
+
+    console.log(`  ${statusIcon} ${todo.content}`);
+  }
+});
+
+// Send a complex task that generates todos
+await client.query(session.id, `
+  Implement a complete authentication system:
+  1. Create user model
+  2. Add password hashing
+  3. Implement JWT tokens
+  4. Create login/logout endpoints
+  5. Add middleware for protected routes
+`);
+```
+
+### onPlanUpdate
+
+Triggered when Claude formulates or updates its execution plan. Useful for showing users what Claude intends to do.
+
+```typescript title="on-plan-update.ts"
+import { EventKeys } from '@anthropic/claude-sdk';
+
+interface PlanStep {
+  id: string;
+  description: string;
+  status: 'planned' | 'executing' | 'completed' | 'failed';
+}
+
+const emitter = client.getEmitter();
+
+emitter.on(EventKeys.plan(session.id), (update: { plan: PlanStep[] }) => {
+  console.log('\n=== Execution Plan ===');
+
+  for (const step of update.plan) {
+    const icon = {
+      planned: '○',
+      executing: '◐',
+      completed: '●',
+      failed: '✗',
+    }[step.status];
+
+    console.log(`${icon} ${step.description}`);
+  }
+
+  console.log('=====================\n');
+});
+```
+
+### onComplete
+
+Called when the entire response is finished, including all tool executions. Use for cleanup and final processing.
+
+```typescript title="on-complete.ts"
+import { EventKeys } from '@anthropic/claude-sdk';
+
+interface Result {
+  content: string;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+  toolCalls: Array<{
+    name: string;
+    input: unknown;
+    output: unknown;
+  }>;
+}
+
+const emitter = client.getEmitter();
+
+// One-time listener for completion
+emitter.once(EventKeys.result(session.id), (result: Result) => {
+  console.log('\n--- Response Complete ---');
+  console.log(`Total tokens: ${result.usage.inputTokens + result.usage.outputTokens}`);
+  console.log(`Tool calls: ${result.toolCalls.length}`);
+
+  // Store final result
+  saveToHistory(session.id, result);
+});
+```
+
+### Combined Event Handling
+
+For comprehensive streaming, combine multiple event handlers:
+
+```typescript title="combined-handlers.ts"
+import { createClaudeClient, EventKeys, TypedEventEmitter } from '@anthropic/claude-sdk';
+
+async function streamWithFullTracking(
+  client: ClaudeClient,
+  sessionId: string,
+  message: string
+): Promise<void> {
+  const emitter = client.getEmitter();
+  const unsubscribers: Array<() => void> = [];
+
+  // Track all output
+  unsubscribers.push(
+    emitter.on(EventKeys.output(sessionId), (output) => {
+      process.stdout.write(output.text);
+    })
+  );
+
+  // Track todos
+  unsubscribers.push(
+    emitter.on(EventKeys.todo(sessionId), (update) => {
+      renderTodoPanel(update.todos);
+    })
+  );
+
+  // Track plan
+  unsubscribers.push(
+    emitter.on(EventKeys.plan(sessionId), (update) => {
+      renderPlanPanel(update.plan);
+    })
+  );
+
+  // Track tool usage
+  unsubscribers.push(
+    emitter.on(EventKeys.tool(sessionId), (tool) => {
+      console.log(`\n[Tool] ${tool.name}`);
+    })
+  );
+
+  // Track tool results
+  unsubscribers.push(
+    emitter.on(EventKeys.toolResult(sessionId), (result) => {
+      console.log(`[Tool Result] Success: ${result.success}`);
+    })
+  );
+
+  // Track errors
+  unsubscribers.push(
+    emitter.on(EventKeys.error(sessionId), (error) => {
+      console.error(`[Error] ${error.message}`);
+    })
+  );
+
+  try {
+    // Wait for completion
+    await emitter.waitFor(EventKeys.result(sessionId), 300000);
+  } finally {
+    // Clean up all listeners
+    for (const unsubscribe of unsubscribers) {
+      unsubscribe();
+    }
+  }
+}
+```
+
+## Handling Streaming Updates
+
+Properly handling streaming updates ensures responsive UIs and accurate state management.
+
+### Accumulating Text
+
+Build complete responses from streaming chunks:
+
+```typescript title="accumulate-text.ts"
+async function collectResponse(
+  client: ClaudeClient,
+  sessionId: string,
+  message: string
+): Promise<string> {
+  const chunks: string[] = [];
+  const events = client.sendMessage(sessionId, message);
+
+  for await (const event of events) {
+    if (event.type === 'text') {
+      chunks.push(event.content);
+    }
+  }
+
+  return chunks.join('');
+}
+```
+
+### Streaming to UI
+
+Update your UI incrementally for a responsive experience:
+
+```typescript title="use-streaming-hook.tsx"
+import { useState, useCallback, useEffect } from 'react';
+import { ClaudeClient, EventKeys, Todo } from '@anthropic/claude-sdk';
+
+function useStreaming(client: ClaudeClient, sessionId: string) {
+  const [content, setContent] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [todos, setTodos] = useState<Todo[]>([]);
+
+  const sendMessage = useCallback(async (message: string) => {
+    setContent('');
+    setIsStreaming(true);
+
+    const emitter = client.getEmitter();
+
+    const unsubOutput = emitter.on(EventKeys.output(sessionId), (output) => {
+      setContent(prev => prev + output.text);
+    });
+
+    const unsubTodo = emitter.on(EventKeys.todo(sessionId), (update) => {
+      setTodos(update.todos);
+    });
+
+    try {
+      await emitter.waitFor(EventKeys.result(sessionId));
+    } finally {
+      unsubOutput();
+      unsubTodo();
+      setIsStreaming(false);
+    }
+  }, [client, sessionId]);
+
+  return { content, isStreaming, todos, sendMessage };
+}
+```
+
+### Error Recovery During Streaming
+
+Handle errors gracefully without losing partial results:
+
+```typescript title="error-recovery.ts"
+async function streamWithRecovery(
+  client: ClaudeClient,
+  sessionId: string,
+  message: string
+): Promise<{ content: string; error?: Error }> {
+  const chunks: string[] = [];
+
+  try {
+    const events = client.sendMessage(sessionId, message);
+
+    for await (const event of events) {
+      if (event.type === 'text') {
+        chunks.push(event.content);
+      } else if (event.type === 'error') {
+        // Capture error but preserve collected content
+        return {
+          content: chunks.join(''),
+          error: event.error,
+        };
+      }
+    }
+
+    return { content: chunks.join('') };
+  } catch (error) {
+    // Network or connection error
+    return {
+      content: chunks.join(''),
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  }
+}
+```
+
+## Buffering and Batching
+
+For performance-sensitive applications, buffer and batch streaming updates to reduce render cycles.
+
+### Basic Buffering
+
+Buffer chunks before updating state:
+
+```typescript title="basic-buffering.ts"
+class StreamBuffer {
+  private buffer: string[] = [];
+  private flushTimeout: NodeJS.Timeout | null = null;
+  private readonly flushInterval: number;
+  private readonly onFlush: (content: string) => void;
+
+  constructor(onFlush: (content: string) => void, flushInterval = 50) {
+    this.onFlush = onFlush;
+    this.flushInterval = flushInterval;
+  }
+
+  push(chunk: string): void {
+    this.buffer.push(chunk);
+
+    if (!this.flushTimeout) {
+      this.flushTimeout = setTimeout(() => this.flush(), this.flushInterval);
+    }
+  }
+
+  flush(): void {
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+      this.flushTimeout = null;
+    }
+
+    if (this.buffer.length > 0) {
+      const content = this.buffer.join('');
+      this.buffer = [];
+      this.onFlush(content);
+    }
+  }
+}
+
+// Usage
+const buffer = new StreamBuffer((content) => {
+  updateUI(content);
+}, 50); // Flush every 50ms
+
+const events = client.sendMessage(session.id, message);
+
+for await (const event of events) {
+  if (event.type === 'text') {
+    buffer.push(event.content);
+  }
+}
+
+// Flush remaining content
+buffer.flush();
+```
+
+### Adaptive Batching
+
+Adjust batch size based on content rate:
+
+```typescript title="adaptive-batching.ts"
+class AdaptiveBatcher {
+  private buffer: string[] = [];
+  private lastFlush = Date.now();
+  private chunkCount = 0;
+  private readonly onFlush: (content: string) => void;
+
+  // Configuration
+  private readonly minBatchSize = 5;
+  private readonly maxBatchSize = 50;
+  private readonly minInterval = 16; // ~60fps
+  private readonly maxInterval = 100;
+
+  constructor(onFlush: (content: string) => void) {
+    this.onFlush = onFlush;
+  }
+
+  push(chunk: string): void {
+    this.buffer.push(chunk);
+    this.chunkCount++;
+
+    const elapsed = Date.now() - this.lastFlush;
+    const batchSize = this.calculateBatchSize();
+
+    // Flush if batch is full or enough time has passed
+    if (this.buffer.length >= batchSize || elapsed >= this.maxInterval) {
+      this.flush();
+    }
+  }
+
+  private calculateBatchSize(): number {
+    // Adjust batch size based on throughput
+    const elapsed = Date.now() - this.lastFlush;
+    const rate = this.chunkCount / Math.max(elapsed, 1) * 1000; // chunks per second
+
+    if (rate > 100) {
+      // High throughput: larger batches
+      return this.maxBatchSize;
+    } else if (rate > 20) {
+      // Medium throughput
+      return Math.floor((this.maxBatchSize + this.minBatchSize) / 2);
+    } else {
+      // Low throughput: smaller batches for responsiveness
+      return this.minBatchSize;
+    }
+  }
+
+  flush(): void {
+    if (this.buffer.length > 0) {
+      const content = this.buffer.join('');
+      this.buffer = [];
+      this.lastFlush = Date.now();
+      this.onFlush(content);
+    }
+  }
+}
+```
+
+### Debounced UI Updates
+
+Prevent UI thrashing with debounced updates:
+
+```typescript title="use-streaming-content.tsx"
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { ClaudeClient, EventKeys } from '@anthropic/claude-sdk';
+
+function useStreamingContent(client: ClaudeClient, sessionId: string) {
+  const [displayContent, setDisplayContent] = useState('');
+  const contentRef = useRef('');
+  const frameRef = useRef<number>();
+
+  const scheduleUpdate = useCallback(() => {
+    if (frameRef.current) return;
+
+    frameRef.current = requestAnimationFrame(() => {
+      setDisplayContent(contentRef.current);
+      frameRef.current = undefined;
+    });
+  }, []);
+
+  useEffect(() => {
+    const emitter = client.getEmitter();
+
+    const unsubscribe = emitter.on(EventKeys.output(sessionId), (output) => {
+      contentRef.current += output.text;
+      scheduleUpdate();
+    });
+
+    return () => {
+      unsubscribe();
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+      }
+    };
+  }, [client, sessionId, scheduleUpdate]);
+
+  return displayContent;
+}
+```
+
+### Backpressure Handling
+
+Handle situations where processing cannot keep up with incoming data:
+
+```typescript title="backpressure.ts"
+class BackpressureHandler {
+  private queue: string[] = [];
+  private processing = false;
+  private readonly maxQueueSize = 1000;
+  private readonly onProcess: (chunks: string[]) => Promise<void>;
+  private readonly onBackpressure: () => void;
+
+  constructor(
+    onProcess: (chunks: string[]) => Promise<void>,
+    onBackpressure: () => void
+  ) {
+    this.onProcess = onProcess;
+    this.onBackpressure = onBackpressure;
+  }
+
+  async push(chunk: string): Promise<void> {
+    if (this.queue.length >= this.maxQueueSize) {
+      this.onBackpressure();
+      // Drop oldest chunks to make room
+      this.queue = this.queue.slice(-Math.floor(this.maxQueueSize / 2));
+    }
+
+    this.queue.push(chunk);
+    await this.processQueue();
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.processing || this.queue.length === 0) return;
+
+    this.processing = true;
+
+    try {
+      // Process in batches
+      const batch = this.queue.splice(0, 100);
+      await this.onProcess(batch);
+    } finally {
+      this.processing = false;
+
+      // Continue processing if more items queued
+      if (this.queue.length > 0) {
+        setImmediate(() => this.processQueue());
+      }
+    }
+  }
+}
+```
+
+## Complete Streaming Example
+
+A production-ready streaming implementation combining all concepts:
+
+```typescript title="complete-streaming.ts"
+import {
+  createClaudeClient,
+  EventKeys,
+  ClaudeClientError,
+} from '@anthropic/claude-sdk';
+
+interface StreamingOptions {
+  onText?: (chunk: string) => void;
+  onTodo?: (todos: Todo[]) => void;
+  onPlan?: (plan: PlanStep[]) => void;
+  onTool?: (name: string, input: unknown) => void;
+  onError?: (error: Error) => void;
+  onComplete?: (result: Result) => void;
+  bufferInterval?: number;
+}
+
+async function streamResponse(
+  client: ClaudeClient,
+  sessionId: string,
+  message: string,
+  options: StreamingOptions = {}
+): Promise<Result> {
+  const emitter = client.getEmitter();
+  const unsubscribers: Array<() => void> = [];
+
+  // Set up buffered text handler
+  const buffer = new StreamBuffer((content) => {
+    options.onText?.(content);
+  }, options.bufferInterval ?? 50);
+
+  // Register event handlers
+  unsubscribers.push(
+    emitter.on(EventKeys.output(sessionId), (output) => {
+      buffer.push(output.text);
+    })
+  );
+
+  if (options.onTodo) {
+    unsubscribers.push(
+      emitter.on(EventKeys.todo(sessionId), (update) => {
+        options.onTodo!(update.todos);
+      })
+    );
+  }
+
+  if (options.onPlan) {
+    unsubscribers.push(
+      emitter.on(EventKeys.plan(sessionId), (update) => {
+        options.onPlan!(update.plan);
+      })
+    );
+  }
+
+  if (options.onTool) {
+    unsubscribers.push(
+      emitter.on(EventKeys.tool(sessionId), (tool) => {
+        options.onTool!(tool.name, tool.input);
+      })
+    );
+  }
+
+  unsubscribers.push(
+    emitter.on(EventKeys.error(sessionId), (error) => {
+      options.onError?.(new Error(error.message));
+    })
+  );
+
+  try {
+    // Send message and wait for result
+    const events = client.sendMessage(sessionId, message);
+
+    let result: Result | undefined;
+
+    for await (const event of events) {
+      if (event.type === 'done') {
+        result = {
+          content: '',
+          usage: event.usage,
+          toolCalls: [],
+        };
+      }
+    }
+
+    // Flush any remaining buffered content
+    buffer.flush();
+
+    if (!result) {
+      throw new Error('Stream ended without result');
+    }
+
+    options.onComplete?.(result);
+    return result;
+
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    options.onError?.(err);
+    throw err;
+
+  } finally {
+    // Clean up all listeners
+    for (const unsubscribe of unsubscribers) {
+      unsubscribe();
+    }
+  }
+}
+
+// Usage example
+async function main() {
+  const client = createClaudeClient({
+    serverUrl: 'ws://localhost:3000',
+    apiKey: process.env.CLAUDE_API_KEY,
+  });
+
+  await client.connect();
+
+  const session = await client.createSession({
+    model: 'claude-sonnet-4-20250514',
+  });
+
+  try {
+    const result = await streamResponse(client, session.id, 'Build a user service', {
+      onText: (chunk) => process.stdout.write(chunk),
+      onTodo: (todos) => {
+        console.log('\n[Todos]', todos.map(t => `${t.status}: ${t.content}`).join(', '));
+      },
+      onPlan: (plan) => {
+        console.log('\n[Plan]', plan.map(s => s.description).join(' -> '));
+      },
+      onTool: (name, input) => {
+        console.log(`\n[Tool: ${name}]`);
+      },
+      onError: (error) => {
+        console.error('\n[Error]', error.message);
+      },
+      onComplete: (result) => {
+        console.log(`\n[Complete] Tokens: ${result.usage.inputTokens + result.usage.outputTokens}`);
+      },
+    });
+
+    console.log('\nFinal result:', result);
+  } finally {
+    await client.destroySession(session.id);
+    await client.disconnect();
+  }
+}
+
+main().catch(console.error);
+```
+
+## Best Practices
+
+| Practice | Description |
+|----------|-------------|
+| Buffer updates | Reduce render cycles by batching chunks |
+| Handle errors gracefully | Preserve partial results on failure |
+| Clean up listeners | Always unsubscribe to prevent memory leaks |
+| Use typed events | Leverage TypeScript for type-safe event handling |
+| Implement backpressure | Handle high-throughput scenarios |
+| Test reconnection | Ensure streaming recovers from connection issues |
+
+## Related
+
+- [Event System](/sdk/events) - Type-safe event subscription
+- [ClaudeClient Reference](/sdk/client) - Client API documentation
+- [Session Management](/guides/session-management) - Session lifecycle and persistence
+- [Cloudflare Deployment](/guides/cloudflare-deployment) - Deploy with Durable Objects
