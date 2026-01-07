@@ -1,7 +1,0 @@
-{
-  "last_failure": "2026-01-06T16:27:33.629292-06:00",
-  "failure_count": 1,
-  "backoff_until": "2026-01-06T16:28:03.629292-06:00",
-  "needs_manual_sync": false,
-  "failure_reason": "git pull failed: exit status 1\nfatal: unable to access 'https://github.com/dot-do/claude.git/': Could not resolve host: github.com\n"
-}
