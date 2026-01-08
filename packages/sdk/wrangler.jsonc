@@ -1,0 +1,176 @@
+{
+  // Wrangler configuration for @dotdo/claude SDK
+  //
+  // This configuration deploys the ClaudeCode Durable Object which provides:
+  // - PTY/stdin streaming for interactive Claude CLI sessions
+  // - capnweb RPC interface matching Claude Agent SDK API
+  // - WebSocket support for real-time streaming
+  // - Todo/Plan update callbacks
+  //
+  // Usage:
+  //   Development: wrangler dev
+  //   Staging:     wrangler deploy --env staging
+  //   Production:  wrangler deploy --env production
+
+  "name": "claude-sdk",
+  "main": "dist/index.mjs",
+  "compatibility_date": "2025-01-06",
+
+  // Workers Settings
+  // Use Node.js compatibility mode for better library support
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Smart placement for Durable Objects (runs in optimal location)
+  "placement": {
+    "mode": "smart"
+  },
+
+  // Durable Objects
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CLAUDE_CODE",
+        "class_name": "ClaudeCode"
+      },
+      {
+        // Sandbox Durable Object from @cloudflare/sandbox
+        "name": "Sandbox",
+        "class_name": "Sandbox",
+        "script_name": "cloudflare-sandbox"
+      }
+    ]
+  },
+
+  // Migrations (for Durable Object storage schema)
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["ClaudeCode"]
+    }
+  ],
+
+  // Environment Variables
+  "vars": {
+    // Default environment - override in staging/production
+    "ENVIRONMENT": "development"
+  },
+
+  // Secrets (set via `wrangler secret put`)
+  // Required secrets:
+  // - ANTHROPIC_API_KEY: API key for Claude
+
+  // KV Namespaces (optional - for session persistence beyond DO storage)
+  // "kv_namespaces": [
+  //   {
+  //     "binding": "SESSION_STORAGE",
+  //     "id": "your-kv-namespace-id"
+  //   }
+  // ],
+
+  // R2 Buckets (optional - for large message buffer storage)
+  // "r2_buckets": [
+  //   {
+  //     "binding": "MESSAGE_BUFFER",
+  //     "bucket_name": "claude-messages"
+  //   }
+  // ],
+
+  // Environment configurations
+  "env": {
+    // Development Environment
+    "development": {
+      "name": "claude-sdk-dev",
+      "vars": {
+        "ENVIRONMENT": "development"
+      }
+    },
+
+    // Staging Environment
+    "staging": {
+      "name": "claude-sdk-staging",
+      "workers_dev": true,
+      "vars": {
+        "ENVIRONMENT": "staging"
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CLAUDE_CODE",
+            "class_name": "ClaudeCode"
+          },
+          {
+            "name": "Sandbox",
+            "class_name": "Sandbox",
+            "script_name": "cloudflare-sandbox-staging"
+          }
+        ]
+      }
+      // Staging KV (uncomment and configure as needed)
+      // "kv_namespaces": [
+      //   {
+      //     "binding": "SESSION_STORAGE",
+      //     "id": "staging-kv-namespace-id"
+      //   }
+      // ]
+    },
+
+    // Production Environment
+    "production": {
+      "name": "claude-sdk",
+      "workers_dev": false,
+      // "routes": [{ "pattern": "claude.example.com/*", "zone_name": "example.com" }],
+      "vars": {
+        "ENVIRONMENT": "production"
+      },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "CLAUDE_CODE",
+            "class_name": "ClaudeCode"
+          },
+          {
+            "name": "Sandbox",
+            "class_name": "Sandbox",
+            "script_name": "cloudflare-sandbox"
+          }
+        ]
+      }
+      // Production KV (uncomment and configure as needed)
+      // "kv_namespaces": [
+      //   {
+      //     "binding": "SESSION_STORAGE",
+      //     "id": "production-kv-namespace-id"
+      //   }
+      // ],
+      // Production R2 (uncomment and configure as needed)
+      // "r2_buckets": [
+      //   {
+      //     "binding": "MESSAGE_BUFFER",
+      //     "bucket_name": "claude-messages-prod"
+      //   }
+      // ]
+    }
+  },
+
+  // Build Configuration
+  "build": {
+    "command": "pnpm build",
+    "watch_dir": "src"
+  },
+
+  // Observability (Cloudflare Logs)
+  "observability": {
+    "enabled": true
+    // Tail logs configuration
+    // "logs": {
+    //   "invocation_logs": true,
+    //   "head_sampling_rate": 1
+    // }
+  },
+
+  // Limits
+  "limits": {
+    // CPU time limit per request (ms)
+    "cpu_ms": 30000
+  }
+}
